@@ -1,0 +1,15 @@
+# Phase 0 — minimal: server only, no heavy ML deps. Lets the sidecar boot
+# on any Python 3.11+ without GPUs or downloads.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# Phase 1 — uncomment to enable real inference. Keep these commented in
+# Phase 0 so a fresh `setup.sh` is fast and offline-friendly.
+# numpy>=1.26
+# pillow>=10.3
+# open_clip_torch==2.30.0
+# torch==2.5.1
+# opencv-python-headless==4.10.0.84
+# pytesseract==0.3.13
+# onnxruntime==1.20.1

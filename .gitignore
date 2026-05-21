@@ -1,0 +1,50 @@
+node_modules
+.next
+out
+dist
+build
+
+# Env
+.env
+.env.local
+.env*.local
+
+# Local DB & data
+prisma/dev.db
+prisma/dev.db-journal
+prisma/*.db
+prisma/*.db-journal
+
+# Python
+services/ai/.venv
+services/ai/__pycache__
+services/ai/**/__pycache__
+*.pyc
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TS build cache
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Editor / agent state
+.claude/
+.cursor/
+.aider*
+
+# Editors
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Tauri (later)
+src-tauri/target
+
+# Generated thumbnails / app data (during dev)
+.gallery-sort-data/

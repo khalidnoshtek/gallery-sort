@@ -1,0 +1,35 @@
+# Gallery Sort AI sidecar — production image.
+# Build:  docker build -f Dockerfile.sidecar -t gallery-sort-ai .
+# Run:    docker run -p 127.0.0.1:7860:7860 -e AI_SIDECAR_TOKEN=$(cat ~/.gallery-sort/sidecar.token) \
+#               -e ALLOW_NON_LOOPBACK=1 gallery-sort-ai
+#
+# NOTE: the in-process loopback check refuses non-loopback clients by default.
+# Container traffic appears as a non-loopback IP from inside, so set
+# ALLOW_NON_LOOPBACK=1 in containers. Bind the host port to 127.0.0.1 instead.
+
+FROM python:3.11-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# tesseract for OCR (Phase 1); libgl/libglib for opencv (Phase 1).
+# Kept lean for Phase 0 — uncomment when enabling real models.
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     tesseract-ocr libgl1 libglib2.0-0 \
+#  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY services/ai/requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY services/ai/ .
+
+EXPOSE 7860
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health').read()" || exit 1
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]

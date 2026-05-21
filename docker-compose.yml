@@ -1,0 +1,52 @@
+# Gallery Sort — orchestrated dev/self-host setup.
+# Usage:
+#   1. cp .env.example .env  (and customize as needed)
+#   2. docker compose up --build
+#   3. Open http://localhost:3000
+#
+# Bind both services to loopback only. The app reaches the sidecar over the
+# internal docker network ("ai:7860"); the sidecar is also exposed on the
+# host loopback for direct testing.
+
+services:
+  ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.sidecar
+    image: gallery-sort-ai
+    environment:
+      AI_SIDECAR_TOKEN: "${AI_SIDECAR_TOKEN:?Set AI_SIDECAR_TOKEN in .env (or cat ~/.gallery-sort/sidecar.token)}"
+      ALLOW_NON_LOOPBACK: "1"
+    ports:
+      - "127.0.0.1:7860:7860"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gallery-sort
+    depends_on:
+      ai:
+        condition: service_healthy
+    environment:
+      GALLERY_SORT_HOME: "/data/.gallery-sort"
+      DATABASE_URL: "file:/data/.gallery-sort/gallery.db"
+      AI_SIDECAR_URL: "http://ai:7860"
+      AI_SIDECAR_TOKEN: "${AI_SIDECAR_TOKEN}"
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - gallery_data:/data/.gallery-sort
+      # Mount your library read-only. Customize host path:
+      # - /Volumes/SSD/Photos:/library:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+volumes:
+  gallery_data:

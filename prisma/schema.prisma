@@ -1,0 +1,340 @@
+// Gallery Sort — local database schema.
+// SQLite, accessed via Prisma for typed queries and migrations;
+// hot paths (bulk scan inserts) bypass Prisma and use better-sqlite3 directly.
+//
+// SQLite doesn't support native enums, so "enum-like" columns are typed as
+// String here and reinforced with literal-union types in src/lib/db/enums.ts.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Libraries ─────────────────────────────────────────────────────────
+
+model Library {
+  id          String   @id @default(cuid())
+  name        String
+  rootPath    String   @unique
+  createdAt   DateTime @default(now())
+  lastScanAt  DateTime?
+  itemCount   Int      @default(0)
+  totalBytes  BigInt   @default(0)
+  isActive    Boolean  @default(true)
+
+  items MediaItem[]
+
+  @@index([isActive])
+}
+
+// ─── Media items (one row per file) ────────────────────────────────────
+
+model MediaItem {
+  id          String   @id @default(cuid())
+  libraryId   String
+  library     Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+
+  // Filesystem
+  path        String   @unique
+  filename    String
+  ext         String
+  mimeType    String?
+  sizeBytes   BigInt
+  mtime       DateTime
+  ctime       DateTime
+  inode       BigInt?
+
+  // Media basics — kind ∈ "IMAGE" | "VIDEO" | "UNKNOWN"
+  kind        String   @default("UNKNOWN")
+  width       Int?
+  height      Int?
+  durationMs  Int?
+  takenAt     DateTime?
+
+  // Pipeline state
+  isScanned       Boolean @default(false)
+  isHashed        Boolean @default(false)
+  isThumbed       Boolean @default(false)
+  isClassified    Boolean @default(false)
+  isEmbedded      Boolean @default(false)
+  isOcred         Boolean @default(false)
+  isQualityScored Boolean @default(false)
+
+  // Classification — see src/lib/db/enums.ts for valid values.
+  category            String  @default("OTHER")
+  categoryConfidence  Float   @default(0)
+  intent              String  @default("UNKNOWN")
+  userIntentLocked    Boolean @default(false)
+  isFavorite          Boolean @default(false)
+  isHidden            Boolean @default(false)
+
+  qualityScore   Float?
+  aestheticScore Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  hash           MediaHash?
+  exif           MediaExif?
+  quality        MediaQuality?
+  classification MediaClassification?
+  embedding      MediaEmbedding?
+  ocr            MediaOcr?
+  thumbnails     MediaThumbnail[]
+  duplicateRefs  DuplicateMember[]
+  eventRefs      EventMember[]
+  albumRefs      AlbumMember[]
+
+  @@index([libraryId, takenAt])
+  @@index([libraryId, category, intent])
+  @@index([libraryId, isFavorite])
+  @@index([isHashed])
+  @@index([isClassified])
+  @@index([isThumbed])
+}
+
+model MediaHash {
+  mediaId    String    @id
+  media      MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sha256     String
+  // dhash64 stored as 16-char hex. Stored as TEXT, not INTEGER, because
+  // better-sqlite3 returns Number for INTEGER columns and a 64-bit dHash
+  // loses precision in that conversion. We round-trip via BigInt in code.
+  dhash64Hex String    @default("0000000000000000")
+  computedAt DateTime  @default(now())
+
+  // sha256 is intentionally NOT unique: dedup requires identical content
+  // across multiple MediaItem rows.
+  @@index([sha256])
+  @@index([dhash64Hex])
+}
+
+model MediaExif {
+  mediaId         String    @id
+  media           MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  make            String?
+  model           String?
+  lens            String?
+  iso             Int?
+  fNumber         Float?
+  exposureTime    Float?
+  focalLength     Float?
+  orientation     Int?
+  gpsLat          Float?
+  gpsLon          Float?
+  gpsAlt          Float?
+  rawJson         String
+}
+
+model MediaQuality {
+  mediaId      String    @id
+  media        MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  blurScore    Float
+  exposureScore Float
+  brightness   Float
+  isBlurry     Boolean   @default(false)
+  isDark       Boolean   @default(false)
+  isOverexposed Boolean  @default(false)
+  computedAt   DateTime  @default(now())
+
+  @@index([isBlurry])
+  @@index([isDark])
+}
+
+model MediaClassification {
+  mediaId    String    @id
+  media      MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  tags       String
+  topLabel   String
+  topScore   Float
+  source     String
+  computedAt DateTime  @default(now())
+}
+
+model MediaEmbedding {
+  mediaId   String    @id
+  media     MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  model     String
+  dim       Int
+  vector    Bytes
+  computedAt DateTime @default(now())
+}
+
+model MediaOcr {
+  mediaId   String    @id
+  media     MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  text      String
+  language  String?
+  engine    String
+  charCount Int
+  computedAt DateTime @default(now())
+}
+
+model MediaThumbnail {
+  id        String    @id @default(cuid())
+  mediaId   String
+  media     MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  variant   String
+  path      String
+  width     Int
+  height    Int
+  bytes     Int
+  format    String
+  createdAt DateTime  @default(now())
+
+  @@unique([mediaId, variant])
+  @@index([mediaId])
+}
+
+// ─── Duplicates ────────────────────────────────────────────────────────
+
+model DuplicateGroup {
+  id           String   @id @default(cuid())
+  kind         String   // "EXACT" | "NEAR" | "SIMILAR"
+  memberCount  Int
+  totalBytes   BigInt
+  bestMediaId  String?
+  createdAt    DateTime @default(now())
+
+  members DuplicateMember[]
+
+  @@index([kind])
+}
+
+model DuplicateMember {
+  groupId   String
+  group     DuplicateGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     MediaItem      @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  score     Float
+  reason    String?
+
+  @@id([groupId, mediaId])
+  @@index([mediaId])
+}
+
+// ─── Events / albums ───────────────────────────────────────────────────
+
+model EventGroup {
+  id         String   @id @default(cuid())
+  libraryId  String
+  label      String
+  startAt    DateTime
+  endAt      DateTime
+  centroidLat Float?
+  centroidLon Float?
+  coverMediaId String?
+  createdAt  DateTime @default(now())
+
+  members EventMember[]
+
+  @@index([libraryId, startAt])
+}
+
+model EventMember {
+  eventId String
+  event   EventGroup @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  mediaId String
+  media   MediaItem  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, mediaId])
+  @@index([mediaId])
+}
+
+model Album {
+  id        String   @id @default(cuid())
+  name      String
+  isSmart   Boolean  @default(false)
+  query     String?
+  coverMediaId String?
+  createdAt DateTime @default(now())
+
+  members AlbumMember[]
+}
+
+model AlbumMember {
+  albumId String
+  album   Album     @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  mediaId String
+  media   MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  addedAt DateTime  @default(now())
+
+  @@id([albumId, mediaId])
+  @@index([mediaId])
+}
+
+// ─── Job queue ─────────────────────────────────────────────────────────
+
+model Job {
+  id         String    @id @default(cuid())
+  type       String
+  payload    String
+  status     String    @default("PENDING") // PENDING | RUNNING | DONE | FAILED | CANCELLED
+  priority   Int       @default(0)
+  attempts   Int       @default(0)
+  maxAttempts Int      @default(3)
+  lastError  String?
+  parentId   String?
+  scheduledAt DateTime @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([status, priority, scheduledAt])
+  @@index([type, status])
+  @@index([parentId])
+}
+
+// ─── Safety: operation log + trash ─────────────────────────────────────
+
+model Operation {
+  id          String   @id @default(cuid())
+  kind        String   // TRASH | RENAME | MOVE | RESTORE | PURGE_TRASH
+  status      String   @default("PLANNED") // PLANNED | EXECUTING | COMPLETED | PARTIAL | FAILED | UNDONE
+  summary     String
+  itemCount   Int
+  bytesAffected BigInt
+  plan        String
+  manifest    String?
+  error       String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  undoneAt    DateTime?
+  undoneBy    String?
+  createdAt   DateTime @default(now())
+
+  trashEntries TrashEntry[]
+
+  @@index([kind, status])
+  @@index([createdAt])
+}
+
+model TrashEntry {
+  id           String   @id @default(cuid())
+  operationId  String
+  operation    Operation @relation(fields: [operationId], references: [id])
+  mediaId      String?
+  originalPath String
+  trashPath    String
+  sha256       String?
+  sizeBytes    BigInt
+  trashedAt    DateTime @default(now())
+  expiresAt    DateTime
+  restoredAt   DateTime?
+  purgedAt     DateTime?
+
+  @@index([expiresAt])
+  @@index([mediaId])
+  @@index([operationId])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
