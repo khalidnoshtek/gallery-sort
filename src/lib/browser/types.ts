@@ -1,5 +1,5 @@
 // In-browser media item. Distinct from the Prisma MediaItem (server) — the
-// browser version holds File handles + base64 thumbnails in memory / IndexedDB.
+// browser version holds File handles + base64 thumbnails in memory.
 
 import type { MediaCategory, MediaIntent } from "../db/enums";
 
@@ -15,11 +15,18 @@ export interface BrowserMediaItem {
   width: number | null;
   height: number | null;
   sha256: string;
-  dhash: string; // 16-char hex
+  dhash: string;
   thumbDataUrl: string | null;
   category: MediaCategory;
   intent: MediaIntent;
   categoryConfidence: number;
+
+  // Quality — computed locally on the decoded thumbnail.
+  // qualityScore: variance of Laplacian. Higher = sharper.
+  //   > 100 = sharp / good, 30-100 = borderline, < 30 = blurry
+  // brightness: 0..1 mean luma. < 0.18 = dark, > 0.92 = overexposed.
+  qualityScore: number | null;
+  brightness: number | null;
 }
 
 export interface BrowserDuplicateGroup {

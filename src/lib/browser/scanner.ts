@@ -1,21 +1,21 @@
 // Browser scanner pipeline — lane-parallel + decode-once.
 //
-// Key perf insights:
-//   1. `createImageBitmap` and `crypto.subtle.digest` already run off the
-//      main JS thread in modern browsers (native browser threadpool).
-//      We just need to keep them BUSY by issuing multiple concurrent
-//      awaits — "lanes" — instead of serializing one file at a time.
-//   2. Each image must be decoded only once. The decoded ImageBitmap is
-//      reused for both dHash (8×8 grayscale) and thumbnail (256-px webp).
-//      Previously we decoded twice per image — that's the single biggest
-//      win, roughly halves per-image cost.
+// For each image: decode ONCE via createImageBitmap, then derive:
+//   - SHA-256 (parallel with decode)
+//   - dHash (64-bit perceptual hash)
+//   - blur score (variance of Laplacian)
+//   - brightness
+//   - thumbnail (256-px webp data URL)
+// from the same decoded bitmap.
 //
-// Effective parallelism on an 8-core Mac: 6-8× the original. For 700
-// images on a modern machine: ~20-40s. For 18k images: ~5-10 min.
+// Concurrency: N lanes (N ≈ CPU cores × 2, capped at 12) keep the browser's
+// native threadpool busy. crypto.subtle.digest and createImageBitmap both
+// run off the JS main thread natively.
 
 import { classifyExt, DECODABLE_IMAGE_EXTS, extOf } from "./extensions";
 import { sha256OfBlob, computeDHashFromBitmap, hamming } from "./hash";
 import { makeThumbFromBitmap } from "./thumb";
+import { computeQualityFromBitmap } from "./quality";
 import { classifyByPath } from "./classify";
 import type { BrowserDuplicateGroup, BrowserMediaItem, ScanProgress } from "./types";
 
@@ -61,10 +61,10 @@ async function processFile(
   let thumbDataUrl: string | null = null;
   let width: number | null = null;
   let height: number | null = null;
+  let qualityScore: number | null = null;
+  let brightness: number | null = null;
 
   if (allowVisual) {
-    // Decode + hash in parallel — the browser runs createImageBitmap and
-    // crypto.subtle.digest in its native threadpool.
     const [shaResult, bitmap] = await Promise.all([
       sha256OfBlob(f).catch(() => ""),
       createImageBitmap(f).catch(() => null),
@@ -74,6 +74,11 @@ async function processFile(
       width = bitmap.width;
       height = bitmap.height;
       dhash = computeDHashFromBitmap(bitmap);
+      const quality = computeQualityFromBitmap(bitmap);
+      if (quality) {
+        qualityScore = quality.blurScore;
+        brightness = quality.brightness;
+      }
       const t = await makeThumbFromBitmap(bitmap).catch(() => null);
       if (t) thumbDataUrl = t.dataUrl;
       bitmap.close?.();
@@ -102,6 +107,8 @@ async function processFile(
     category: cls.category,
     intent: cls.intent,
     categoryConfidence: cls.confidence,
+    qualityScore,
+    brightness,
   };
 }
 
@@ -114,8 +121,6 @@ export async function scan(opts: ScanOptions): Promise<ScanResult> {
   const total = allFiles.length;
   const thumbCap = opts.thumbnailLimitBytes ?? 50 * 1024 * 1024;
   const cpuCount = typeof navigator !== "undefined" ? navigator.hardwareConcurrency ?? 4 : 4;
-  // Concurrency: more lanes ≠ always faster — browser has finite native
-  // threads. 8 hits the sweet spot on most hardware without thrashing.
   const lanes = Math.max(2, Math.min(opts.concurrency ?? cpuCount * 2, 12));
 
   let lastEmit = 0;

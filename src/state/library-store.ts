@@ -9,6 +9,11 @@ interface LibraryState {
   duplicatesExact: BrowserDuplicateGroup[];
   duplicatesNear: BrowserDuplicateGroup[];
   progress: ScanProgress | null;
+
+  // Staging — items the user has decided to remove. The browser never
+  // actually deletes; we generate a shell script the user runs locally.
+  stagedForTrash: Set<string>;
+
   setProgress: (p: ScanProgress | null) => void;
   setResult: (
     summary: BrowserLibrarySummary,
@@ -16,12 +21,11 @@ interface LibraryState {
     exact: BrowserDuplicateGroup[],
     near: BrowserDuplicateGroup[],
   ) => void;
+  stageItems: (ids: string[]) => void;
+  unstageItems: (ids: string[]) => void;
+  clearStaging: () => void;
   clear: () => void;
 }
-
-// In-session only. Base64 thumbnails would blow past localStorage limits,
-// and persisting metadata without thumbnails leaves you with broken images
-// after reload. Fresh scan per session is the contract.
 
 export const useLibraryStore = create<LibraryState>((set) => ({
   summary: null,
@@ -29,9 +33,31 @@ export const useLibraryStore = create<LibraryState>((set) => ({
   duplicatesExact: [],
   duplicatesNear: [],
   progress: null,
+  stagedForTrash: new Set(),
+
   setProgress: (p) => set({ progress: p }),
   setResult: (summary, items, exact, near) =>
-    set({ summary, items, duplicatesExact: exact, duplicatesNear: near, progress: null }),
+    set({
+      summary,
+      items,
+      duplicatesExact: exact,
+      duplicatesNear: near,
+      progress: null,
+      stagedForTrash: new Set(),
+    }),
+  stageItems: (ids) =>
+    set((s) => {
+      const next = new Set(s.stagedForTrash);
+      ids.forEach((id) => next.add(id));
+      return { stagedForTrash: next };
+    }),
+  unstageItems: (ids) =>
+    set((s) => {
+      const next = new Set(s.stagedForTrash);
+      ids.forEach((id) => next.delete(id));
+      return { stagedForTrash: next };
+    }),
+  clearStaging: () => set({ stagedForTrash: new Set() }),
   clear: () =>
     set({
       summary: null,
@@ -39,5 +65,6 @@ export const useLibraryStore = create<LibraryState>((set) => ({
       duplicatesExact: [],
       duplicatesNear: [],
       progress: null,
+      stagedForTrash: new Set(),
     }),
 }));

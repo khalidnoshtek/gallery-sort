@@ -1,9 +1,10 @@
 "use client";
 
 import { type ComponentType } from "react";
+import { useLibraryStore } from "@/state/library-store";
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
-  IconLibrary, IconClock, IconSearch, IconBroom, IconDup,
+  IconLibrary, IconClock, IconSearch, IconBroom, IconDup, IconSparkle,
   IconTrash, IconFolder, IconPlus, IconRestore, LumenMark,
 } from "./icons";
 import type { View } from "./types";
@@ -46,12 +47,16 @@ interface Props {
   onClearLibrary?: () => void;
   dupGroupCount: number;
   reclaimable: number;
+  suggestionCount: number;
+  stagedCount: number;
 }
 
 export function Sidebar({
-  view, setView, onScan, realLibrary, onClearLibrary, dupGroupCount, reclaimable,
+  view, setView, onScan, realLibrary, onClearLibrary,
+  dupGroupCount, reclaimable, suggestionCount, stagedCount,
 }: Props) {
   const hasLib = realLibrary !== null;
+  useLibraryStore((s) => s.items.length); // re-render hint when library changes
 
   return (
     <aside className="sidebar">
@@ -76,6 +81,7 @@ export function Sidebar({
       <div className="sb-section">
         <SideItem icon={IconLibrary} label="Library" active={view === "library"} count={hasLib ? fmtCount(realLibrary.count) : "—"} onClick={() => setView("library")} disabled={!hasLib} />
         <SideItem icon={IconClock} label="Timeline" active={view === "timeline"} onClick={() => setView("timeline")} disabled={!hasLib} />
+        <SideItem icon={IconSparkle} label="AI Suggestions" active={view === "suggest"} count={hasLib ? suggestionCount : "—"} onClick={() => setView("suggest")} disabled={!hasLib} />
         <SideItem icon={IconSearch} label="Search" active={view === "search"} onClick={() => setView("search")} disabled={!hasLib} />
       </div>
 
@@ -85,7 +91,7 @@ export function Sidebar({
         <div className="sb-section-label">Cleanup</div>
         <SideItem icon={IconBroom} label="Dashboard" active={view === "cleanup"} count={hasLib && reclaimable > 0 ? fmtBytes(reclaimable) : "—"} onClick={() => setView("cleanup")} disabled={!hasLib} />
         <SideItem icon={IconDup} label="Duplicates" active={view === "dups"} count={dupGroupCount} onClick={() => setView("dups")} disabled={!hasLib} />
-        <SideItem icon={IconTrash} label="Trash" active={view === "trash"} count={0} onClick={() => setView("trash")} />
+        <SideItem icon={IconTrash} label="Staged for trash" active={view === "trash"} count={stagedCount} onClick={() => setView("trash")} />
       </div>
 
       {hasLib && (

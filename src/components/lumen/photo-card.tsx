@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useLibraryStore } from "@/state/library-store";
 import type { Photo } from "@/lib/lumen/data";
-import { IconCheck, IconShot, IconVideo } from "./icons";
+import { IconCheck, IconShot, IconTrash, IconVideo } from "./icons";
 
 function hashHue(s: string) {
   let h = 0;
@@ -77,8 +78,15 @@ interface CardProps {
 }
 
 export function PhotoCard({ photo, selected, onToggle, height, useMock }: CardProps) {
+  const isStaged = useLibraryStore((s) => s.stagedForTrash.has(photo.id));
+
   return (
-    <div className="card" data-selected={selected ? "1" : "0"} data-photoid={photo.id} style={{ height }}>
+    <div
+      className="card"
+      data-selected={selected ? "1" : "0"}
+      data-photoid={photo.id}
+      style={{ height, opacity: isStaged ? 0.32 : 1 }}
+    >
       <PhotoThumb photo={photo} useMock={useMock} />
       <div className="card-veil" />
       <button
@@ -92,11 +100,12 @@ export function PhotoCard({ photo, selected, onToggle, height, useMock }: CardPr
       </button>
 
       <div className="card-meta">
-        {photo.cat === "video" && (
-          <span className="badge"><IconVideo size={11} /></span>
-        )}
-        {photo.cat === "screenshot" && (
-          <span className="badge"><IconShot size={11} /></span>
+        {photo.cat === "video" && <span className="badge"><IconVideo size={11} /></span>}
+        {photo.cat === "screenshot" && <span className="badge"><IconShot size={11} /></span>}
+        {isStaged && (
+          <span className="badge" style={{ background: "rgba(220,80,80,0.85)", color: "white" }}>
+            <IconTrash size={11} /> staged
+          </span>
         )}
       </div>
     </div>

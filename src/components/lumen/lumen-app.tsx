@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLibraryStore } from "@/state/library-store";
 import { adaptPhotos, adaptDuplicates, computeCleanup, buildSemanticMap } from "@/lib/lumen/adapter";
+import { buildSuggestions } from "@/lib/lumen/suggestions";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { LibraryView } from "./library-view";
 import { CleanupView } from "./cleanup-view";
 import { DupView } from "./dup-view";
 import { SearchView } from "./search-view";
+import { SuggestView } from "./suggest-view";
 import { TrashView } from "./trash-view";
 import { ScanModal } from "./scan-modal";
 import { EmptyState } from "./empty-state";
@@ -25,6 +27,7 @@ export function LumenApp() {
   const realItems = useLibraryStore((s) => s.items);
   const realExact = useLibraryStore((s) => s.duplicatesExact);
   const realNear = useLibraryStore((s) => s.duplicatesNear);
+  const staged = useLibraryStore((s) => s.stagedForTrash);
   const clearLibrary = useLibraryStore((s) => s.clear);
 
   const hasRealLibrary = realItems.length > 0;
@@ -48,6 +51,11 @@ export function LumenApp() {
     () => (hasRealLibrary ? buildSemanticMap(activePhotos) : {}),
     [hasRealLibrary, activePhotos],
   );
+
+  const suggestionCount = useMemo(() => {
+    if (!hasRealLibrary) return 0;
+    return buildSuggestions(realItems, realExact, realNear).length;
+  }, [hasRealLibrary, realItems, realExact, realNear]);
 
   const realLibraryInfo = hasRealLibrary && summary
     ? { name: summary.folderName, count: summary.itemCount }
@@ -114,6 +122,9 @@ export function LumenApp() {
                       gridStyle={gridStyle} useMock={false} />
         );
         break;
+      case "suggest":
+        body = <SuggestView setView={switchView} />;
+        break;
       case "trash":
         body = <TrashView />;
         break;
@@ -134,6 +145,8 @@ export function LumenApp() {
             onClearLibrary={hasRealLibrary ? clearLibrary : undefined}
             dupGroupCount={activeDupGroups.length}
             reclaimable={activeCleanup?.reclaim ?? 0}
+            suggestionCount={suggestionCount}
+            stagedCount={staged.size}
           />
           <div className="main">
             <Topbar
@@ -142,6 +155,7 @@ export function LumenApp() {
               setGridStyle={setGridStyle}
               onClearSel={() => setSelected(new Set())}
               selectedCount={selected.size}
+              selectedIds={[...selected]}
               query={query}
               setQuery={setQuery}
               photoCount={activePhotos.length}
@@ -155,7 +169,7 @@ export function LumenApp() {
           {showScan && (
             <ScanModal
               onClose={() => setShowScan(false)}
-              onComplete={() => { setShowScan(false); switchView("library"); }}
+              onComplete={() => { setShowScan(false); switchView("suggest"); }}
             />
           )}
         </div>

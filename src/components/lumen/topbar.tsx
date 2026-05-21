@@ -1,9 +1,10 @@
 "use client";
 
+import { useLibraryStore } from "@/state/library-store";
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
   IconSearch, IconMasonry, IconGrid, IconList, IconRefresh,
-  IconX, IconFolder, IconTrash,
+  IconX, IconTrash,
 } from "./icons";
 import type { GridStyle, View } from "./types";
 
@@ -13,6 +14,7 @@ interface Props {
   setGridStyle: (g: GridStyle) => void;
   onClearSel: () => void;
   selectedCount: number;
+  selectedIds: string[];
   query: string;
   setQuery: (q: string) => void;
   photoCount: number;
@@ -26,14 +28,17 @@ const TITLES: Record<View, string> = {
   timeline: "Timeline",
   cleanup: "Cleanup",
   dups: "Duplicates",
-  trash: "Trash",
+  trash: "Staged for trash",
   search: "Search",
+  suggest: "AI Suggestions",
 };
 
 export function Topbar({
-  view, gridStyle, setGridStyle, onClearSel, selectedCount, query, setQuery,
+  view, gridStyle, setGridStyle, onClearSel, selectedCount, selectedIds, query, setQuery,
   photoCount, dupGroupCount, reclaimable, isReal,
 }: Props) {
+  const stageItems = useLibraryStore((s) => s.stageItems);
+
   const subForView = () => {
     if (!isReal) return null;
     if (view === "library") return `${fmtCount(photoCount)} items indexed`;
@@ -42,6 +47,12 @@ export function Topbar({
     return null;
   };
   const sub = subForView();
+
+  const moveToTrash = () => {
+    if (selectedIds.length === 0) return;
+    stageItems(selectedIds);
+    onClearSel();
+  };
 
   return (
     <header className="topbar">
@@ -77,8 +88,9 @@ export function Topbar({
           <button className="sel-x" onClick={onClearSel}><IconX size={13} /></button>
           <span className="sel-count">{selectedCount} selected</span>
           <div className="sel-actions">
-            <button className="sel-act"><IconFolder size={13} /> Move to album</button>
-            <button className="sel-act danger"><IconTrash size={13} /> Move to Trash</button>
+            <button className="sel-act danger" onClick={moveToTrash}>
+              <IconTrash size={13} /> Stage for trash
+            </button>
           </div>
         </div>
       )}
