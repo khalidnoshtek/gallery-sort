@@ -1,22 +1,17 @@
 // Browser scanner pipeline — lane-parallel + decode-once.
 //
-// For each image: decode ONCE via createImageBitmap, then derive:
-//   - SHA-256 (parallel with decode)
-//   - dHash (64-bit perceptual hash)
-//   - blur score (variance of Laplacian)
-//   - brightness
-//   - thumbnail (256-px webp data URL)
-// from the same decoded bitmap.
-//
-// Concurrency: N lanes (N ≈ CPU cores × 2, capped at 12) keep the browser's
-// native threadpool busy. crypto.subtle.digest and createImageBitmap both
-// run off the JS main thread natively.
+// Two ingest paths:
+//   1. <input webkitdirectory> → FileList (read-only, all browsers)
+//   2. window.showDirectoryPicker → walks the FileSystemDirectoryHandle
+//      to produce both File objects AND file handles for later moves/
+//      deletes. (Chromium / Safari 16+.)
 
 import { classifyExt, DECODABLE_IMAGE_EXTS, extOf } from "./extensions";
 import { sha256OfBlob, computeDHashFromBitmap, hamming } from "./hash";
 import { makeThumbFromBitmap } from "./thumb";
 import { computeQualityFromBitmap } from "./quality";
 import { classifyByPath } from "./classify";
+import { fsHandles } from "./handles";
 import type { BrowserDuplicateGroup, BrowserMediaItem, ScanProgress } from "./types";
 
 const HAMMING_THRESHOLD = 6;
@@ -24,12 +19,15 @@ const NEAR_WINDOW = 64;
 const PROGRESS_HZ = 20;
 const PROGRESS_INTERVAL_MS = 1000 / PROGRESS_HZ;
 
-interface InputFile extends File {
-  webkitRelativePath: string;
+export interface ScanInput {
+  file: File;
+  relativePath: string;
+  /** Parent directory handle — present only when picked via showDirectoryPicker. */
+  parentDirHandle?: FileSystemDirectoryHandle;
 }
 
 export interface ScanOptions {
-  files: FileList | File[];
+  inputs: ScanInput[];
   onProgress?: (p: ScanProgress) => void;
   signal?: AbortSignal;
   thumbnailLimitBytes?: number;
@@ -46,13 +44,14 @@ function id(): string {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 }
 
-async function processFile(
-  f: InputFile,
+async function processInput(
+  input: ScanInput,
   thumbCap: number,
 ): Promise<BrowserMediaItem | null> {
+  const f = input.file;
   const ext = extOf(f.name);
   const kind = classifyExt(ext);
-  const relativePath = f.webkitRelativePath || f.name;
+  const relativePath = input.relativePath;
   const isImage = kind === "IMAGE" && DECODABLE_IMAGE_EXTS.has(ext);
   const allowVisual = isImage && f.size <= thumbCap;
 
@@ -90,8 +89,15 @@ async function processFile(
   if (!sha) return null;
 
   const cls = classifyByPath(relativePath);
+  const itemId = id();
+
+  // Store the file handle for later trash/delete operations.
+  if (input.parentDirHandle) {
+    fsHandles.setFile(itemId, input.parentDirHandle, f.name);
+  }
+
   return {
-    id: id(),
+    id: itemId,
     relativePath,
     filename: f.name,
     ext,
@@ -113,12 +119,10 @@ async function processFile(
 }
 
 export async function scan(opts: ScanOptions): Promise<ScanResult> {
-  const allFiles: InputFile[] = Array.from(opts.files as FileList).filter(
-    (f): f is InputFile => classifyExt(extOf(f.name)) !== "UNKNOWN",
-  );
+  const inputs = opts.inputs.filter((i) => classifyExt(extOf(i.file.name)) !== "UNKNOWN");
 
   const startedAt = performance.now();
-  const total = allFiles.length;
+  const total = inputs.length;
   const thumbCap = opts.thumbnailLimitBytes ?? 50 * 1024 * 1024;
   const cpuCount = typeof navigator !== "undefined" ? navigator.hardwareConcurrency ?? 4 : 4;
   const lanes = Math.max(2, Math.min(opts.concurrency ?? cpuCount * 2, 12));
@@ -140,7 +144,7 @@ export async function scan(opts: ScanOptions): Promise<ScanResult> {
 
   emit("enumerating", 0, null, true);
 
-  const items = new Array<BrowserMediaItem | null>(allFiles.length).fill(null);
+  const items = new Array<BrowserMediaItem | null>(inputs.length).fill(null);
   let scanned = 0;
   let nextIdx = 0;
 
@@ -148,11 +152,11 @@ export async function scan(opts: ScanOptions): Promise<ScanResult> {
     while (true) {
       if (opts.signal?.aborted) return;
       const idx = nextIdx++;
-      if (idx >= allFiles.length) return;
-      const f = allFiles[idx]!;
-      items[idx] = await processFile(f, thumbCap);
+      if (idx >= inputs.length) return;
+      const inp = inputs[idx]!;
+      items[idx] = await processInput(inp, thumbCap);
       scanned++;
-      emit("hashing", scanned, f.webkitRelativePath || f.name);
+      emit("hashing", scanned, inp.relativePath);
     }
   };
 

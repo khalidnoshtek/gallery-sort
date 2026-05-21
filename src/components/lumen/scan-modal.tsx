@@ -2,8 +2,9 @@
 
 import { useRef, useState } from "react";
 import { useLibraryStore } from "@/state/library-store";
-import { scan as runScan } from "@/lib/browser/scanner";
-import { fmtCount, fmtBytes } from "@/lib/lumen/data";
+import { scan as runScan, type ScanInput } from "@/lib/browser/scanner";
+import { fsHandles, supportsFsAccess } from "@/lib/browser/handles";
+import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import { IconCheck, IconDrive, IconFolder, IconKeep, IconX } from "./icons";
 
 type Phase = "pick" | "scanning" | "done";
@@ -23,6 +24,35 @@ interface Props {
   onComplete: () => void;
 }
 
+async function walkDirectory(
+  dir: FileSystemDirectoryHandle,
+  prefix = "",
+): Promise<ScanInput[]> {
+  const out: ScanInput[] = [];
+  // @ts-expect-error entries() is on FileSystemDirectoryHandle but not always typed
+  for await (const [name, entry] of dir.entries()) {
+    const path = prefix ? `${prefix}/${name}` : name;
+    if (entry.kind === "file") {
+      const handle = entry as FileSystemFileHandle;
+      const file = await handle.getFile();
+      out.push({ file, relativePath: path, parentDirHandle: dir });
+    } else if (entry.kind === "directory") {
+      const sub = await walkDirectory(entry as FileSystemDirectoryHandle, path);
+      out.push(...sub);
+    }
+  }
+  return out;
+}
+
+function listToInputs(files: FileList | File[]): ScanInput[] {
+  const out: ScanInput[] = [];
+  for (let i = 0; i < (files as FileList).length; i++) {
+    const f = (files as FileList)[i]!;
+    out.push({ file: f, relativePath: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name });
+  }
+  return out;
+}
+
 export function ScanModal({ onClose, onComplete }: Props) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [phase, setPhase] = useState<Phase>("pick");
@@ -33,18 +63,19 @@ export function ScanModal({ onClose, onComplete }: Props) {
   const [counts, setCounts] = useState({ files: 0, dups: 0, images: 0, videos: 0 });
   const [folderName, setFolderName] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [writeMode, setWriteMode] = useState(false);
   const setStoreProgress = useLibraryStore((s) => s.setProgress);
   const setStoreResult = useLibraryStore((s) => s.setResult);
+
+  const canWrite = supportsFsAccess();
 
   function pushFinding(msg: string) {
     setFindings((f) => [{ msg, id: Math.random() }, ...f].slice(0, 18));
   }
 
-  async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const first = files[0] as File & { webkitRelativePath?: string };
-    const top = first.webkitRelativePath?.split("/")[0] ?? "Selected folder";
-    setFolderName(top);
+  async function runWithInputs(inputs: ScanInput[], topName: string, writeAccess: boolean) {
+    setFolderName(topName);
+    setWriteMode(writeAccess);
     setError(null);
     setPhase("scanning");
     setProgress(0);
@@ -53,7 +84,7 @@ export function ScanModal({ onClose, onComplete }: Props) {
 
     try {
       const result = await runScan({
-        files,
+        inputs,
         onProgress: (p) => {
           setStoreProgress(p);
           const pct = p.total > 0 ? (p.scanned / p.total) * 100 : 0;
@@ -70,7 +101,6 @@ export function ScanModal({ onClose, onComplete }: Props) {
         },
       });
 
-      // Stream image/video counts in batches at the end (cheap enough).
       const images = result.items.filter((i) => i.kind === "IMAGE").length;
       const videos = result.items.filter((i) => i.kind === "VIDEO").length;
       setCounts({
@@ -89,7 +119,7 @@ export function ScanModal({ onClose, onComplete }: Props) {
 
       setStoreResult(
         {
-          folderName: top,
+          folderName: topName,
           itemCount: result.items.length,
           totalBytes: result.totalBytes,
           scannedAt: Date.now(),
@@ -97,6 +127,7 @@ export function ScanModal({ onClose, onComplete }: Props) {
         result.items,
         result.duplicates.exact,
         result.duplicates.near,
+        writeAccess,
       );
       setPhase("done");
     } catch (err) {
@@ -105,8 +136,37 @@ export function ScanModal({ onClose, onComplete }: Props) {
     }
   }
 
-  function pickFolder() {
+  async function pickWithFsAccess() {
+    fsHandles.clear();
+    try {
+      const handle = await window.showDirectoryPicker!({ mode: "readwrite", id: "lumen-library" });
+      fsHandles.setRoot(handle);
+      setError(null);
+      // Walk before scanning so we have the input count for progress.
+      setPhase("scanning");
+      setPhaseLabel("Reading folder structure…");
+      const inputs = await walkDirectory(handle);
+      await runWithInputs(inputs, handle.name || "Selected folder", true);
+    } catch (err) {
+      if ((err as { name?: string }).name === "AbortError") {
+        setPhase("pick");
+        return;
+      }
+      setError(String(err));
+      setPhase("pick");
+    }
+  }
+
+  function pickFallback() {
     fileInputRef.current?.click();
+  }
+
+  async function handleFallbackFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    fsHandles.clear();
+    const first = files[0] as File & { webkitRelativePath?: string };
+    const top = first.webkitRelativePath?.split("/")[0] ?? "Selected folder";
+    await runWithInputs(listToInputs(files), top, false);
   }
 
   return (
@@ -128,7 +188,6 @@ export function ScanModal({ onClose, onComplete }: Props) {
           <button className="modal-x" onClick={onClose}><IconX size={14} /></button>
         </header>
 
-        {/* Hidden picker — supports any browser via webkitdirectory */}
         <input
           ref={fileInputRef}
           type="file"
@@ -137,54 +196,52 @@ export function ScanModal({ onClose, onComplete }: Props) {
           directory=""
           multiple
           style={{ display: "none" }}
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => handleFallbackFiles(e.target.files)}
         />
 
         {phase === "pick" && (
           <>
             <div className="scan-status">
               <p style={{ color: "var(--secondary)", fontSize: 13.5, margin: "4px 0 18px", lineHeight: 1.55 }}>
-                Lumen reads every image in the folder you pick — locally, in your browser. Nothing is uploaded.
-                Files aren&apos;t moved or modified.
+                Lumen reads every image in the folder you pick — locally, in your browser. Nothing uploads.
               </p>
-              <button className="btn primary" onClick={pickFolder} style={{ padding: "12px 18px" }}>
-                <IconFolder size={14} /> Choose folder
-              </button>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {canWrite && (
+                  <button className="btn primary" onClick={pickWithFsAccess} style={{ padding: "12px 18px" }}>
+                    <IconFolder size={14} /> Choose folder (with cleanup access)
+                  </button>
+                )}
+                <button className={canWrite ? "btn ghost" : "btn primary"} onClick={pickFallback} style={{ padding: "12px 18px" }}>
+                  <IconFolder size={14} /> Choose folder (read only)
+                </button>
+              </div>
+              {canWrite ? (
+                <p style={{ color: "var(--muted)", fontSize: 11.5, marginTop: 12, letterSpacing: "-0.005em" }}>
+                  &ldquo;With cleanup access&rdquo; lets Lumen actually move flagged files into a <code style={{ fontFamily: "var(--mono)" }}>.lumen-trash/</code> subfolder when you confirm.
+                  &ldquo;Read only&rdquo; can analyze but only generate a script for you to run manually.
+                </p>
+              ) : (
+                <p style={{ color: "var(--muted)", fontSize: 11.5, marginTop: 12 }}>
+                  Your browser doesn&apos;t support direct file moves (try Chrome/Edge/Safari for that). You&apos;ll be able to analyze and download a cleanup script.
+                </p>
+              )}
               {error && (
                 <p style={{ color: "var(--danger)", fontSize: 12, marginTop: 14 }}>{error}</p>
               )}
             </div>
 
             <div className="scan-stats">
-              <Stat label="Method" value="SHA-256" hint="Web Crypto" />
+              <Stat label="Hash" value="SHA-256" hint="Web Crypto" />
               <Stat label="Perceptual" value="dHash" hint="64-bit" />
-              <Stat label="Thumbnails" value="webp" hint="256px" />
-              <Stat label="Storage" value="Memory" hint="Per session" />
+              <Stat label="Blur" value="Laplacian" hint="variance" />
+              <Stat label="Thumbnails" value="256-px" hint="webp" />
               <Stat label="Uploads" value="0" hint="Ever" />
-            </div>
-
-            <div className="scan-log">
-              <div className="scan-log-label">What gets indexed</div>
-              <div className="scan-log-list">
-                {[
-                  "Filenames, sizes, dimensions",
-                  "SHA-256 of every file (exact-duplicate detection)",
-                  "Perceptual dHash of every image (resize/recompress detection)",
-                  "256-px webp thumbnail per image (canvas-rendered, in-memory)",
-                  "Heuristic category by path: screenshots, WhatsApp, transactional",
-                ].map((m) => (
-                  <div key={m} className="scan-log-row">
-                    <span className="scan-log-dot" />
-                    <span className="scan-log-msg">{m}</span>
-                  </div>
-                ))}
-              </div>
             </div>
 
             <footer className="modal-foot">
               <div className="scan-safety">
                 <IconKeep size={14} />
-                <span>Read-only. Nothing on disk is moved or modified.</span>
+                <span>Read-only by default. Nothing on disk moves without explicit confirmation.</span>
               </div>
               <button className="btn ghost" onClick={onClose}>Maybe later</button>
             </footer>
@@ -265,7 +322,7 @@ export function ScanModal({ onClose, onComplete }: Props) {
             </div>
 
             <div className="scan-log">
-              <div className="scan-log-label">Highlights</div>
+              <div className="scan-log-label">{writeMode ? "Cleanup access: ON · you can move/delete from the app" : "Cleanup access: OFF · script-only mode"}</div>
               <div className="scan-log-list">
                 {findings.slice(0, 8).map((f) => (
                   <div key={f.id} className="scan-log-row">
@@ -279,9 +336,9 @@ export function ScanModal({ onClose, onComplete }: Props) {
             <footer className="modal-foot">
               <div className="scan-safety">
                 <IconCheck size={14} />
-                <span>Your library is now in Lumen. Nothing was modified on disk.</span>
+                <span>Your library is in Lumen. Nothing was modified on disk.</span>
               </div>
-              <button className="btn primary" onClick={onComplete}>Open library</button>
+              <button className="btn primary" onClick={onComplete}>Open AI suggestions</button>
             </footer>
           </>
         )}
