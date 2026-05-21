@@ -1,31 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { fmtCount } from "@/lib/lumen/data";
-import { IconDrive, IconKeep, IconX } from "./icons";
+import { useRef, useState } from "react";
+import { useLibraryStore } from "@/state/library-store";
+import { scan as runScan } from "@/lib/browser/scanner";
+import { fmtCount, fmtBytes } from "@/lib/lumen/data";
+import { IconCheck, IconDrive, IconFolder, IconKeep, IconX } from "./icons";
 
-const SCAN_FOLDERS = [
-  "Samsung T7 SSD → DCIM/Camera",
-  "Samsung T7 SSD → DCIM/100ANDRO",
-  "Samsung T7 SSD → WhatsApp/Media/Images",
-  "Samsung T7 SSD → Pictures/Screenshots",
-  "Samsung T7 SSD → Downloads/old-phone-2021",
-];
-
-const FINDING_TEMPLATES = [
-  "Reading EXIF for IMG_{n}.jpg",
-  "Hashing IMG_{n}.jpg",
-  "Computing pHash for IMG_{n}.jpg",
-  "Embedding CLIP for IMG_{n}.jpg",
-  "OCR on Screenshot_{n}.png",
-  "Found duplicate group · 3 copies of beach-sunset",
-  "Detected burst sequence · 7 frames",
-  "Detected blurry photo IMG_{n}.jpg · quality 0.18",
-  "Detected screenshot IMG_{n}.png",
-  "Detected WhatsApp media IMG-{n}-WA.jpg",
-  "New face cluster #14 · 12 photos",
-  "Generated thumbnail IMG_{n}.jpg",
-];
+type Phase = "pick" | "scanning" | "done";
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -43,105 +24,267 @@ interface Props {
 }
 
 export function ScanModal({ onClose, onComplete }: Props) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [phase, setPhase] = useState<Phase>("pick");
   const [progress, setProgress] = useState(0);
-  const [phase, setPhase] = useState("Reading folder structure…");
+  const [phaseLabel, setPhaseLabel] = useState("Reading folder structure…");
+  const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [findings, setFindings] = useState<Array<{ msg: string; id: number }>>([]);
-  const [stats, setStats] = useState({ files: 0, dups: 0, blur: 0, screenshots: 0, embeds: 0 });
+  const [counts, setCounts] = useState({ files: 0, dups: 0, images: 0, videos: 0 });
+  const [folderName, setFolderName] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const setStoreProgress = useLibraryStore((s) => s.setProgress);
+  const setStoreResult = useLibraryStore((s) => s.setResult);
 
-  useEffect(() => {
-    let p = 0;
-    let timer: ReturnType<typeof setTimeout>;
-    let finished = false;
-    const tick = () => {
-      p = Math.min(100, p + 0.6 + Math.random() * 1.4);
-      setProgress(p);
-      if (p < 15) setPhase("Reading folder structure…");
-      else if (p < 35) setPhase("Extracting EXIF & generating thumbnails…");
-      else if (p < 60) setPhase("Computing perceptual hashes…");
-      else if (p < 85) setPhase("Generating CLIP embeddings…");
-      else if (p < 98) setPhase("Detecting duplicates & quality issues…");
-      else setPhase("Finalizing index…");
+  function pushFinding(msg: string) {
+    setFindings((f) => [{ msg, id: Math.random() }, ...f].slice(0, 18));
+  }
 
-      if (Math.random() > 0.35) {
-        const tpl = FINDING_TEMPLATES[Math.floor(Math.random() * FINDING_TEMPLATES.length)]!;
-        const n = 1000 + Math.floor(Math.random() * 9000);
-        const msg = tpl.replace("{n}", String(n));
-        setFindings((f) => [{ msg, id: Math.random() }, ...f].slice(0, 18));
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const first = files[0] as File & { webkitRelativePath?: string };
+    const top = first.webkitRelativePath?.split("/")[0] ?? "Selected folder";
+    setFolderName(top);
+    setError(null);
+    setPhase("scanning");
+    setProgress(0);
+    setFindings([]);
+    setCounts({ files: 0, dups: 0, images: 0, videos: 0 });
+
+    try {
+      const result = await runScan({
+        files,
+        onProgress: (p) => {
+          setStoreProgress(p);
+          const pct = p.total > 0 ? (p.scanned / p.total) * 100 : 0;
+          setProgress(pct);
+          setCurrentPath(p.current);
+          if (p.phase === "enumerating") setPhaseLabel("Reading folder structure…");
+          else if (p.phase === "hashing") setPhaseLabel("Hashing & generating thumbnails…");
+          else if (p.phase === "dedup") setPhaseLabel("Detecting duplicates…");
+          else if (p.phase === "done") setPhaseLabel("Finalizing index…");
+          if (p.current && Math.random() < 0.18) {
+            const name = p.current.split("/").pop() ?? p.current;
+            pushFinding(`Hashing ${name}`);
+          }
+        },
+      });
+
+      // Stream image/video counts in batches at the end (cheap enough).
+      const images = result.items.filter((i) => i.kind === "IMAGE").length;
+      const videos = result.items.filter((i) => i.kind === "VIDEO").length;
+      setCounts({
+        files: result.items.length,
+        dups: result.duplicates.exact.length + result.duplicates.near.length,
+        images,
+        videos,
+      });
+
+      for (const g of result.duplicates.exact) {
+        pushFinding(`Found exact-duplicate group · ${g.memberIds.length} copies`);
+      }
+      for (const g of result.duplicates.near.slice(0, 3)) {
+        pushFinding(`Found near-duplicate cluster · ${g.memberIds.length} variants`);
       }
 
-      setStats((s) => ({
-        files: Math.min(87421, s.files + Math.floor(80 + Math.random() * 220)),
-        dups: Math.min(412, s.dups + (Math.random() > 0.7 ? 1 : 0)),
-        blur: Math.min(328, s.blur + (Math.random() > 0.85 ? 1 : 0)),
-        screenshots: Math.min(1934, s.screenshots + (Math.random() > 0.7 ? Math.floor(Math.random() * 4) : 0)),
-        embeds: Math.min(87421, s.embeds + Math.floor(60 + Math.random() * 180)),
-      }));
+      setStoreResult(
+        {
+          folderName: top,
+          itemCount: result.items.length,
+          totalBytes: result.totalBytes,
+          scannedAt: Date.now(),
+        },
+        result.items,
+        result.duplicates.exact,
+        result.duplicates.near,
+      );
+      setPhase("done");
+    } catch (err) {
+      setError(String(err));
+      setPhase("pick");
+    }
+  }
 
-      if (p < 100) {
-        timer = setTimeout(tick, 80 + Math.random() * 160);
-      } else if (!finished) {
-        finished = true;
-        setTimeout(() => onComplete(), 800);
-      }
-    };
-    tick();
-    return () => clearTimeout(timer);
-  }, [onComplete]);
-
-  const folderIdx = Math.min(SCAN_FOLDERS.length - 1, Math.floor(progress / 22));
+  function pickFolder() {
+    fileInputRef.current?.click();
+  }
 
   return (
     <div className="modal-veil" onClick={onClose}>
       <div className="modal scan-modal" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
-            <div className="modal-eyebrow">Scan in progress · all local</div>
-            <h2 className="modal-title">Indexing your library</h2>
+            <div className="modal-eyebrow">
+              {phase === "pick" && "Pick a folder · all local"}
+              {phase === "scanning" && "Scan in progress · all local"}
+              {phase === "done" && "Scan complete · all local"}
+            </div>
+            <h2 className="modal-title">
+              {phase === "pick" && "Choose your photo library"}
+              {phase === "scanning" && "Indexing your library"}
+              {phase === "done" && "Library indexed"}
+            </h2>
           </div>
           <button className="modal-x" onClick={onClose}><IconX size={14} /></button>
         </header>
 
-        <div className="scan-status">
-          <div className="scan-folder">
-            <IconDrive size={14} />
-            <span>{SCAN_FOLDERS[folderIdx]}</span>
-          </div>
-          <div className="scan-bar-wrap">
-            <div className="scan-bar" style={{ width: `${progress}%` }} />
-          </div>
-          <div className="scan-pct">
-            <span className="scan-phase">{phase}</span>
-            <span className="scan-pct-num">{progress.toFixed(1)}%</span>
-          </div>
-        </div>
+        {/* Hidden picker — supports any browser via webkitdirectory */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          /* @ts-expect-error non-standard HTML attribute */
+          webkitdirectory=""
+          directory=""
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => handleFiles(e.target.files)}
+        />
 
-        <div className="scan-stats">
-          <Stat label="Files indexed" value={fmtCount(stats.files)} />
-          <Stat label="Embeddings" value={fmtCount(stats.embeds)} />
-          <Stat label="Duplicate groups" value={fmtCount(stats.dups)} />
-          <Stat label="Screenshots" value={fmtCount(stats.screenshots)} />
-          <Stat label="Low quality" value={fmtCount(stats.blur)} />
-        </div>
+        {phase === "pick" && (
+          <>
+            <div className="scan-status">
+              <p style={{ color: "var(--secondary)", fontSize: 13.5, margin: "4px 0 18px", lineHeight: 1.55 }}>
+                Lumen reads every image in the folder you pick — locally, in your browser. Nothing is uploaded.
+                Files aren&apos;t moved or modified.
+              </p>
+              <button className="btn primary" onClick={pickFolder} style={{ padding: "12px 18px" }}>
+                <IconFolder size={14} /> Choose folder
+              </button>
+              {error && (
+                <p style={{ color: "var(--danger)", fontSize: 12, marginTop: 14 }}>{error}</p>
+              )}
+            </div>
 
-        <div className="scan-log">
-          <div className="scan-log-label">Live findings</div>
-          <div className="scan-log-list">
-            {findings.map((f) => (
-              <div key={f.id} className="scan-log-row">
-                <span className="scan-log-dot" />
-                <span className="scan-log-msg">{f.msg}</span>
+            <div className="scan-stats">
+              <Stat label="Method" value="SHA-256" hint="Web Crypto" />
+              <Stat label="Perceptual" value="dHash" hint="64-bit" />
+              <Stat label="Thumbnails" value="webp" hint="256px" />
+              <Stat label="Storage" value="Memory" hint="Per session" />
+              <Stat label="Uploads" value="0" hint="Ever" />
+            </div>
+
+            <div className="scan-log">
+              <div className="scan-log-label">What gets indexed</div>
+              <div className="scan-log-list">
+                {[
+                  "Filenames, sizes, dimensions",
+                  "SHA-256 of every file (exact-duplicate detection)",
+                  "Perceptual dHash of every image (resize/recompress detection)",
+                  "256-px webp thumbnail per image (canvas-rendered, in-memory)",
+                  "Heuristic category by path: screenshots, WhatsApp, transactional",
+                ].map((m) => (
+                  <div key={m} className="scan-log-row">
+                    <span className="scan-log-dot" />
+                    <span className="scan-log-msg">{m}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
 
-        <footer className="modal-foot">
-          <div className="scan-safety">
-            <IconKeep size={14} />
-            <span>Read-only scan. Nothing will be modified until you confirm.</span>
-          </div>
-          <button className="btn ghost" onClick={onClose}>Run in background</button>
-        </footer>
+            <footer className="modal-foot">
+              <div className="scan-safety">
+                <IconKeep size={14} />
+                <span>Read-only. Nothing on disk is moved or modified.</span>
+              </div>
+              <button className="btn ghost" onClick={onClose}>Maybe later</button>
+            </footer>
+          </>
+        )}
+
+        {phase === "scanning" && (
+          <>
+            <div className="scan-status">
+              <div className="scan-folder">
+                <IconDrive size={14} />
+                <span>{folderName} {currentPath ? `→ ${currentPath.split("/").slice(-2).join("/")}` : ""}</span>
+              </div>
+              <div className="scan-bar-wrap">
+                <div className="scan-bar" style={{ width: `${progress}%` }} />
+              </div>
+              <div className="scan-pct">
+                <span className="scan-phase">{phaseLabel}</span>
+                <span className="scan-pct-num">{progress.toFixed(1)}%</span>
+              </div>
+            </div>
+
+            <div className="scan-stats">
+              <Stat label="Files scanned" value={fmtCount(counts.files)} />
+              <Stat label="Images" value={fmtCount(counts.images)} />
+              <Stat label="Videos" value={fmtCount(counts.videos)} />
+              <Stat label="Dup groups" value={fmtCount(counts.dups)} />
+              <Stat label="Uploads" value="0" hint="Local only" />
+            </div>
+
+            <div className="scan-log">
+              <div className="scan-log-label">Live findings</div>
+              <div className="scan-log-list">
+                {findings.map((f) => (
+                  <div key={f.id} className="scan-log-row">
+                    <span className="scan-log-dot" />
+                    <span className="scan-log-msg">{f.msg}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <footer className="modal-foot">
+              <div className="scan-safety">
+                <IconKeep size={14} />
+                <span>Read-only scan. Nothing will be modified until you confirm.</span>
+              </div>
+              <button className="btn ghost" onClick={onClose}>Run in background</button>
+            </footer>
+          </>
+        )}
+
+        {phase === "done" && (
+          <>
+            <div className="scan-status">
+              <div className="scan-folder">
+                <IconDrive size={14} />
+                <span>{folderName}</span>
+              </div>
+              <div className="scan-bar-wrap">
+                <div className="scan-bar" style={{ width: `100%` }} />
+              </div>
+              <div className="scan-pct">
+                <span className="scan-phase">Done · {fmtCount(counts.files)} files indexed</span>
+                <span className="scan-pct-num">100%</span>
+              </div>
+            </div>
+
+            <div className="scan-stats">
+              <Stat label="Files indexed" value={fmtCount(counts.files)} />
+              <Stat label="Images" value={fmtCount(counts.images)} />
+              <Stat label="Videos" value={fmtCount(counts.videos)} />
+              <Stat label="Duplicates" value={fmtCount(counts.dups)} hint="groups" />
+              <Stat
+                label="Total size"
+                value={fmtBytes(useLibraryStore.getState().summary?.totalBytes ?? 0)}
+              />
+            </div>
+
+            <div className="scan-log">
+              <div className="scan-log-label">Highlights</div>
+              <div className="scan-log-list">
+                {findings.slice(0, 8).map((f) => (
+                  <div key={f.id} className="scan-log-row">
+                    <span className="scan-log-dot" />
+                    <span className="scan-log-msg">{f.msg}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <footer className="modal-foot">
+              <div className="scan-safety">
+                <IconCheck size={14} />
+                <span>Your library is now in Lumen. Nothing was modified on disk.</span>
+              </div>
+              <button className="btn primary" onClick={onComplete}>Open library</button>
+            </footer>
+          </>
+        )}
       </div>
     </div>
   );

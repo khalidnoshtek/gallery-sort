@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, type ComponentType } from "react";
-import { PHOTOS, SUGGESTIONS, CLEANUP, DUP_GROUPS, EVENTS, fmtBytes, fmtCount } from "@/lib/lumen/data";
+import { PHOTOS, SUGGESTIONS, EVENTS, fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
   IconLibrary, IconClock, IconSparkle, IconSearch, IconBroom, IconDup,
   IconBlur, IconTrash, IconChevD, IconMountain, IconDrive, IconFolder,
-  IconPlus, LumenMark,
+  IconPlus, IconRestore, LumenMark,
 } from "./icons";
 import type { View } from "./types";
 
@@ -48,13 +48,19 @@ interface Props {
   setSelectedAlbum: (id: string) => void;
   onScan: () => void;
   realLibrary?: { name: string; count: number } | null;
+  onClearLibrary?: () => void;
+  dupGroupCount: number;
+  reclaimable: number;
 }
 
-export function Sidebar({ view, setView, selectedAlbum, setSelectedAlbum, onScan, realLibrary }: Props) {
+export function Sidebar({
+  view, setView, selectedAlbum, setSelectedAlbum, onScan,
+  realLibrary, onClearLibrary, dupGroupCount, reclaimable,
+}: Props) {
   const [memOpen, setMemOpen] = useState(true);
 
   const libCount = realLibrary?.count ?? PHOTOS.length * 1024;
-  const libSub = realLibrary ? realLibrary.name : "Local · 248 GB indexed";
+  const libSub = realLibrary ? `Local · ${fmtCount(realLibrary.count)} items` : "Local · sample library";
 
   return (
     <aside className="sidebar">
@@ -85,9 +91,9 @@ export function Sidebar({ view, setView, selectedAlbum, setSelectedAlbum, onScan
 
       <div className="sb-section">
         <div className="sb-section-label">Cleanup</div>
-        <SideItem icon={IconBroom} label="Dashboard" active={view === "cleanup"} count={fmtBytes(CLEANUP.reclaim)} onClick={() => setView("cleanup")} />
-        <SideItem icon={IconDup} label="Duplicates" active={view === "dups"} count={DUP_GROUPS.length} onClick={() => setView("dups")} />
-        <SideItem icon={IconBlur} label="Quality" active={view === "quality"} count={328} onClick={() => setView("quality")} />
+        <SideItem icon={IconBroom} label="Dashboard" active={view === "cleanup"} count={reclaimable > 0 ? fmtBytes(reclaimable) : "—"} onClick={() => setView("cleanup")} />
+        <SideItem icon={IconDup} label="Duplicates" active={view === "dups"} count={dupGroupCount} onClick={() => setView("dups")} />
+        <SideItem icon={IconBlur} label="Quality" active={view === "quality"} count={realLibrary ? "—" : 328} onClick={() => setView("quality")} />
         <SideItem icon={IconTrash} label="Trash" active={view === "trash"} count={0} onClick={() => setView("trash")} />
       </div>
 
@@ -116,9 +122,15 @@ export function Sidebar({ view, setView, selectedAlbum, setSelectedAlbum, onScan
 
       <div className="sb-section">
         <div className="sb-section-label">Sources</div>
-        <SideItem icon={IconDrive} label="Samsung T7 SSD" active={false} count="248 GB" onClick={() => {}} />
-        <SideItem icon={IconFolder} label="~/Pictures/Camera" active={false} count="3,124" onClick={() => {}} />
-        <SideItem icon={IconFolder} label="~/Downloads" active={false} count="412" onClick={() => {}} />
+        {realLibrary ? (
+          <SideItem icon={IconFolder} label={realLibrary.name} active={false} count={fmtCount(realLibrary.count)} onClick={() => {}} />
+        ) : (
+          <>
+            <SideItem icon={IconDrive} label="Samsung T7 SSD" active={false} count="248 GB" onClick={() => {}} />
+            <SideItem icon={IconFolder} label="~/Pictures/Camera" active={false} count="3,124" onClick={() => {}} />
+            <SideItem icon={IconFolder} label="~/Downloads" active={false} count="412" onClick={() => {}} />
+          </>
+        )}
       </div>
 
       <div className="sb-spacer" />
@@ -126,8 +138,18 @@ export function Sidebar({ view, setView, selectedAlbum, setSelectedAlbum, onScan
       <div className="sb-footer">
         <button className="sb-scan-btn" onClick={onScan}>
           <IconPlus size={14} />
-          <span>Scan a new folder</span>
+          <span>{realLibrary ? "Scan another folder" : "Scan a new folder"}</span>
         </button>
+        {realLibrary && onClearLibrary && (
+          <button
+            onClick={onClearLibrary}
+            className="side-item"
+            style={{ padding: "8px 12px", color: "var(--muted)", fontSize: 11.5 }}
+          >
+            <span className="si-icon"><IconRestore size={13} /></span>
+            <span>Reset to sample library</span>
+          </button>
+        )}
         <div className="sb-privacy">
           <span className="dot-live" />
           <span>All processing local · No cloud sync</span>

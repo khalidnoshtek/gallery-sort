@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { PHOTOS } from "@/lib/lumen/data";
+import { useEffect, useMemo, useState } from "react";
+import { useLibraryStore } from "@/state/library-store";
+import { PHOTOS, DUP_GROUPS, CLEANUP, SEMANTIC_RESULTS } from "@/lib/lumen/data";
+import { adaptPhotos, adaptDuplicates, computeCleanup, buildSemanticMap } from "@/lib/lumen/adapter";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { LibraryView } from "./library-view";
@@ -25,7 +27,40 @@ export function LumenApp() {
   const [showScan, setShowScan] = useState(false);
   const [showRename, setShowRename] = useState(false);
 
-  // Fit the fixed 1380×880 design to the viewport — scale-as-a-unit.
+  const summary = useLibraryStore((s) => s.summary);
+  const realItems = useLibraryStore((s) => s.items);
+  const realExact = useLibraryStore((s) => s.duplicatesExact);
+  const realNear = useLibraryStore((s) => s.duplicatesNear);
+  const clearLibrary = useLibraryStore((s) => s.clear);
+
+  const hasRealLibrary = realItems.length > 0;
+
+  // Active dataset — real if scanned, mock otherwise. The Lumen views never
+  // know which one they're showing; they just render whatever they get.
+  const activePhotos = useMemo(
+    () => (hasRealLibrary ? adaptPhotos(realItems) : PHOTOS),
+    [hasRealLibrary, realItems],
+  );
+
+  const activeDupGroups = useMemo(
+    () => (hasRealLibrary ? adaptDuplicates([...realExact, ...realNear], realItems) : DUP_GROUPS),
+    [hasRealLibrary, realExact, realNear, realItems],
+  );
+
+  const activeCleanup = useMemo(
+    () => (hasRealLibrary ? computeCleanup(realItems, realExact, realNear) : CLEANUP),
+    [hasRealLibrary, realItems, realExact, realNear],
+  );
+
+  const activeSemanticMap = useMemo(
+    () => (hasRealLibrary ? buildSemanticMap(activePhotos) : SEMANTIC_RESULTS),
+    [hasRealLibrary, activePhotos],
+  );
+
+  const realLibraryInfo = hasRealLibrary && summary
+    ? { name: summary.folderName, count: summary.itemCount }
+    : null;
+
   useEffect(() => {
     const apply = () => {
       const pad = 28;
@@ -39,7 +74,6 @@ export function LumenApp() {
     return () => window.removeEventListener("resize", apply);
   }, []);
 
-  // Selecting query auto-switches to search
   useEffect(() => {
     if (query && view !== "search") setView("search");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -51,44 +85,46 @@ export function LumenApp() {
     setSelected(new Set());
   };
 
-  const selectedPhotos = PHOTOS.filter((p) => selected.has(p.id));
+  const selectedPhotos = activePhotos.filter((p) => selected.has(p.id));
 
   let body: React.ReactNode;
   switch (view) {
     case "library":
       body = (
-        <LibraryView photos={PHOTOS} selected={selected} setSelected={setSelected}
+        <LibraryView photos={activePhotos} selected={selected} setSelected={setSelected}
                      gridStyle={gridStyle} showConfidence useMock={false} />
       );
       break;
     case "timeline":
       body = (
-        <LibraryView photos={PHOTOS} selected={selected} setSelected={setSelected}
+        <LibraryView photos={activePhotos} selected={selected} setSelected={setSelected}
                      gridStyle="timeline" showConfidence useMock={false} />
       );
       break;
     case "cleanup":
-      body = <CleanupView setView={switchView} showConfidence />;
+      body = <CleanupView setView={switchView} showConfidence cleanup={activeCleanup} hasRealLibrary={hasRealLibrary} />;
       break;
     case "dups":
-      body = <DupView />;
+      body = <DupView groups={activeDupGroups} />;
       break;
     case "search":
-      body = <SearchView query={query} setQuery={setQuery}
-                         gridStyle={gridStyle} useMock={false} showConfidence />;
+      body = (
+        <SearchView query={query} setQuery={setQuery}
+                    photos={activePhotos} semanticMap={activeSemanticMap}
+                    gridStyle={gridStyle} useMock={false} showConfidence />
+      );
       break;
     case "suggest":
       body = <SuggestView />;
       break;
     case "quality":
-      body = <QualityView useMock={false} />;
+      body = <QualityView photos={activePhotos} useMock={false} />;
       break;
     case "trash":
       body = <TrashView />;
       break;
     case "event":
-      body = <EventView albumId={selectedAlbum} gridStyle={gridStyle}
-                        useMock={false} showConfidence />;
+      body = <EventView albumId={selectedAlbum} gridStyle={gridStyle} useMock={false} showConfidence />;
       break;
     default:
       body = null;
@@ -104,6 +140,10 @@ export function LumenApp() {
             selectedAlbum={selectedAlbum}
             setSelectedAlbum={setSelectedAlbum}
             onScan={() => setShowScan(true)}
+            realLibrary={realLibraryInfo}
+            onClearLibrary={hasRealLibrary ? clearLibrary : undefined}
+            dupGroupCount={activeDupGroups.length}
+            reclaimable={activeCleanup.reclaim}
           />
           <div className="main">
             <Topbar
@@ -115,6 +155,10 @@ export function LumenApp() {
               selectedCount={selected.size}
               query={query}
               setQuery={setQuery}
+              photoCount={activePhotos.length}
+              dupGroupCount={activeDupGroups.length}
+              reclaimable={activeCleanup.reclaim}
+              isReal={hasRealLibrary}
             />
             <div className="content">{body}</div>
           </div>
@@ -122,12 +166,12 @@ export function LumenApp() {
           {showScan && (
             <ScanModal
               onClose={() => setShowScan(false)}
-              onComplete={() => setShowScan(false)}
+              onComplete={() => { setShowScan(false); switchView("library"); }}
             />
           )}
           {showRename && (
             <RenameModal
-              photos={selectedPhotos.length ? selectedPhotos : PHOTOS.slice(0, 12)}
+              photos={selectedPhotos.length ? selectedPhotos : activePhotos.slice(0, 12)}
               onClose={() => setShowRename(false)}
               useMock={false}
             />

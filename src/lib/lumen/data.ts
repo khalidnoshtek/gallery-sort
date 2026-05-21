@@ -32,6 +32,8 @@ export interface DupMember {
   dims: [number, number];
   when: string;
   note: string;
+  /** Optional explicit thumbnail URL (data: or http:). Falls back to UN(uid). */
+  thumbUrl?: string;
 }
 
 export interface DupGroup {

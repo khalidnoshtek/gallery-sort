@@ -1,6 +1,6 @@
 "use client";
 
-import { PHOTOS, CLEANUP, DUP_GROUPS, fmtBytes, fmtCount } from "@/lib/lumen/data";
+import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
   IconSearch, IconMasonry, IconGrid, IconList, IconRefresh, IconSettings,
   IconX, IconWand, IconStar, IconFolder, IconTrash,
@@ -16,6 +16,10 @@ interface Props {
   onClearSel: () => void;
   query: string;
   setQuery: (q: string) => void;
+  photoCount: number;
+  dupGroupCount: number;
+  reclaimable: number;
+  isReal: boolean;
 }
 
 const TITLES: Record<View, string> = {
@@ -30,14 +34,33 @@ const TITLES: Record<View, string> = {
   event: "Memory",
 };
 
-export function Topbar({ view, gridStyle, setGridStyle, onRename, selectedCount, onClearSel, query, setQuery }: Props) {
+export function Topbar({
+  view, gridStyle, setGridStyle, onRename, selectedCount, onClearSel, query, setQuery,
+  photoCount, dupGroupCount, reclaimable, isReal,
+}: Props) {
+  const subForView = () => {
+    if (view === "library") {
+      return isReal
+        ? `${fmtCount(photoCount)} items indexed`
+        : `Sample · ${fmtCount(photoCount)} items shown`;
+    }
+    if (view === "cleanup") {
+      return reclaimable > 0
+        ? `${fmtBytes(reclaimable)} reclaimable across ${6} categories`
+        : "Scan a folder to see cleanup recommendations";
+    }
+    if (view === "dups") {
+      return `${dupGroupCount} group${dupGroupCount === 1 ? "" : "s"} detected`;
+    }
+    return null;
+  };
+  const sub = subForView();
+
   return (
     <header className="topbar">
       <div className="tb-left">
         <h1 className="tb-title">{TITLES[view] || "Lumen"}</h1>
-        {view === "library" && <span className="tb-sub">All photos · {fmtCount(PHOTOS.length * 1024)} items</span>}
-        {view === "cleanup" && <span className="tb-sub">{fmtBytes(CLEANUP.reclaim)} reclaimable across {CLEANUP.buckets.length} categories</span>}
-        {view === "dups" && <span className="tb-sub">{DUP_GROUPS.length} groups · {fmtBytes(14.2 * 1024 ** 3)} potential savings</span>}
+        {sub && <span className="tb-sub">{sub}</span>}
       </div>
 
       <div className="tb-search">

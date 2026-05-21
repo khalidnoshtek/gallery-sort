@@ -1,14 +1,34 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DUP_GROUPS, UN, fmtBytes } from "@/lib/lumen/data";
-import { IconKeep, IconSparkle, IconStar, IconTrash } from "./icons";
+import { UN, fmtBytes, type DupGroup } from "@/lib/lumen/data";
+import { IconDup, IconKeep, IconSparkle, IconStar, IconTrash } from "./icons";
 
 type Action = "keep" | "trash";
 
-export function DupView() {
-  const [groupId, setGroupId] = useState(DUP_GROUPS[0]!.id);
-  const group = DUP_GROUPS.find((g) => g.id === groupId)!;
+interface Props {
+  groups: DupGroup[];
+}
+
+export function DupView({ groups }: Props) {
+  if (groups.length === 0) {
+    return (
+      <div className="view" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="trash-empty">
+          <IconDup size={28} style={{ opacity: 0.3 }} />
+          <h2>No duplicates yet.</h2>
+          <p>
+            Scan a folder to find byte-identical and near-duplicate images. Lumen groups them and
+            picks the best copy to keep.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const [groupId, setGroupId] = useState(groups[0]!.id);
+  const group = groups.find((g) => g.id === groupId) ?? groups[0]!;
+
   const recommended = group.members.reduce((best, m) => (m.size > best.size ? m : best), group.members[0]!);
 
   const initActions = (): Record<string, Action> => {
@@ -28,15 +48,18 @@ export function DupView() {
     .filter((m) => actions[m.filename] === "trash")
     .reduce((a, m) => a + m.size, 0);
 
+  const totalAllBytes = groups.reduce((a, g) => a + g.members.reduce((b, m) => b + m.size, 0), 0);
+
   return (
     <div className="view-dups">
       <aside className="dup-list">
         <div className="dup-list-head">
-          <span>{DUP_GROUPS.length} groups</span>
-          <span>{fmtBytes(14.2 * 1024 ** 3)} savings</span>
+          <span>{groups.length} groups</span>
+          <span>{fmtBytes(totalAllBytes)} total</span>
         </div>
-        {DUP_GROUPS.map((g) => {
+        {groups.map((g) => {
           const sample = g.members[0]!;
+          const thumb = sample.thumbUrl ?? UN(sample.uid, 120);
           return (
             <button
               key={g.id}
@@ -46,7 +69,7 @@ export function DupView() {
             >
               <div className="dl-thumb">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={UN(sample.uid, 120)} alt="" />
+                <img src={thumb} alt="" />
                 <span className="dl-count">{g.members.length}</span>
               </div>
               <div>
@@ -84,11 +107,12 @@ export function DupView() {
             const isKeep = actions[m.filename] === "keep";
             const isTrash = actions[m.filename] === "trash";
             const isRec = m === recommended;
+            const thumb = m.thumbUrl ?? UN(m.uid, 600);
             return (
               <article key={m.filename} className="dup-tile" data-action={actions[m.filename]}>
                 <div className="dup-tile-img">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={UN(m.uid, 600)} alt="" draggable={false} />
+                  <img src={thumb} alt="" draggable={false} />
                   {isRec && (
                     <span className="dup-rec-flag"><IconStar size={11} /> Recommended keep</span>
                   )}

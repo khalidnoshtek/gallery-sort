@@ -1,6 +1,6 @@
 "use client";
 
-import { CLEANUP, fmtBytes, fmtCount, type CleanupBucket } from "@/lib/lumen/data";
+import { fmtBytes, fmtCount, type CleanupBucket, type CleanupSummary } from "@/lib/lumen/data";
 import {
   IconBroom, IconSparkle, IconDrive, IconDup, IconWA, IconShot, IconBlur, IconBurst, IconVideo,
   IconFile, IconArrowR, IconKeep, IconRestore,
@@ -57,6 +57,9 @@ function BucketCard({ bucket, onOpen, showConfidence }: { bucket: CleanupBucket;
 }
 
 function StorageBar({ buckets, total }: { buckets: CleanupBucket[]; total: number }) {
+  if (total <= 0) {
+    return <div style={{ height: 8, background: "rgba(255,255,255,0.04)", borderRadius: 999 }} />;
+  }
   return (
     <div className="storage-bar">
       <div className="sbar-track">
@@ -119,32 +122,37 @@ function Heatmap() {
 interface Props {
   setView: (v: View) => void;
   showConfidence?: boolean;
+  cleanup: CleanupSummary;
+  hasRealLibrary: boolean;
 }
 
-export function CleanupView({ setView, showConfidence = true }: Props) {
-  const total = CLEANUP.buckets.reduce((a, b) => a + b.size, 0);
+export function CleanupView({ setView, showConfidence = true, cleanup, hasRealLibrary }: Props) {
+  const total = cleanup.buckets.reduce((a, b) => a + b.size, 0);
+  const photoBytes = cleanup.photosUsed;
+  const reclaimGb = cleanup.reclaim / 1024 ** 3;
 
   const recs = [
-    { id: "r1", text: "Move 1,247 WhatsApp images older than 1 year to a separate album. Free ~3.8 GB.", primary: "Apply", icon: IconWA },
-    { id: "r2", text: "Keep the sharpest frame of 23 burst sequences. Trash 589 near-duplicates.", primary: "Review", icon: IconBurst },
-    { id: "r3", text: "Compress 18 large videos (>500 MB) — projected savings 6.2 GB, no quality loss.", primary: "Preview", icon: IconVideo },
+    { id: "r1", text: `Trash ${fmtCount(cleanup.buckets.find((b) => b.id === "dups")?.count ?? 0)} duplicate files. Free up ${fmtBytes(cleanup.buckets.find((b) => b.id === "dups")?.size ?? 0)}.`, primary: "Review", icon: IconDup },
+    { id: "r2", text: `Move ${fmtCount(cleanup.buckets.find((b) => b.id === "shots")?.count ?? 0)} screenshots into a separate album.`, primary: "Apply", icon: IconShot },
+    { id: "r3", text: `${fmtCount(cleanup.buckets.find((b) => b.id === "ws")?.count ?? 0)} WhatsApp/messenger files detected — likely safe to clear.`, primary: "Preview", icon: IconWA },
   ];
 
-  const usedFraction = CLEANUP.driveUsed / CLEANUP.driveTotal;
-  const circumference = 2 * Math.PI * 50;
+  const subEyebrow = hasRealLibrary
+    ? `${fmtCount(cleanup.totalScanned)} files indexed in this session`
+    : "Sample library · scan your folder to see real numbers";
 
   return (
     <div className="view">
       <section className="cleanup-hero">
         <div>
-          <div className="ch-eyebrow">Last scanned 4 minutes ago · 87,421 files</div>
+          <div className="ch-eyebrow">{subEyebrow}</div>
           <h2 className="ch-headline">
-            <span className="ch-num">27.4</span>
+            <span className="ch-num">{reclaimGb >= 100 ? reclaimGb.toFixed(0) : reclaimGb.toFixed(1)}</span>
             <span className="ch-unit">GB</span>
             <span className="ch-tag">reclaimable</span>
           </h2>
           <p className="ch-sub">
-            Across <strong>{CLEANUP.buckets.length} categories</strong>. Every file is staged, never deleted —
+            Across <strong>{cleanup.buckets.length} categories</strong>. Every file is staged, never deleted —
             review each bucket and confirm before anything moves.
           </p>
           <div className="ch-actions">
@@ -161,7 +169,7 @@ export function CleanupView({ setView, showConfidence = true }: Props) {
           <div className="ch-disk">
             <div className="ch-disk-label">
               <IconDrive size={14} />
-              <span>Samsung T7 SSD · 512 GB</span>
+              <span>{hasRealLibrary ? "Library size" : "Samsung T7 SSD · 512 GB"}</span>
             </div>
             <div className="ch-disk-ring">
               <svg viewBox="0 0 120 120">
@@ -173,20 +181,20 @@ export function CleanupView({ setView, showConfidence = true }: Props) {
                   fill="none"
                   stroke="var(--accent)"
                   strokeWidth="10"
-                  strokeDasharray={`${usedFraction * circumference} ${circumference}`}
+                  strokeDasharray={`${hasRealLibrary ? 220 : (389 / 512) * 314} 314`}
                   strokeLinecap="round"
                   transform="rotate(-90 60 60)"
                 />
               </svg>
               <div className="ch-disk-center">
-                <div className="ch-disk-used">389 GB</div>
-                <div className="ch-disk-of">of 512 GB</div>
+                <div className="ch-disk-used">{hasRealLibrary ? fmtBytes(photoBytes) : "389 GB"}</div>
+                <div className="ch-disk-of">{hasRealLibrary ? `${fmtCount(cleanup.totalScanned)} files` : "of 512 GB"}</div>
               </div>
             </div>
             <div className="ch-disk-meta">
-              <div><span className="ch-dot photos" />Photos<b>248 GB</b></div>
-              <div><span className="ch-dot other" />Other<b>141 GB</b></div>
-              <div><span className="ch-dot free" />Free<b>123 GB</b></div>
+              <div><span className="ch-dot photos" />Photos<b>{hasRealLibrary ? fmtBytes(photoBytes) : "248 GB"}</b></div>
+              <div><span className="ch-dot other" />Reclaim<b>{fmtBytes(cleanup.reclaim)}</b></div>
+              <div><span className="ch-dot free" />Dup groups<b>{fmtCount((cleanup.buckets.find((b) => b.id === "dups")?.count ?? 0))}</b></div>
             </div>
           </div>
         </div>
@@ -197,11 +205,11 @@ export function CleanupView({ setView, showConfidence = true }: Props) {
           <h3>By category</h3>
           <span>Tap any to review and stage actions</span>
         </div>
-        <StorageBar buckets={CLEANUP.buckets} total={total} />
+        <StorageBar buckets={cleanup.buckets} total={total} />
       </section>
 
       <section className="cleanup-buckets">
-        {CLEANUP.buckets.map((b) => (
+        {cleanup.buckets.map((b) => (
           <BucketCard
             key={b.id}
             bucket={b}
@@ -233,7 +241,7 @@ export function CleanupView({ setView, showConfidence = true }: Props) {
       <section className="cleanup-heat">
         <div className="section-head">
           <h3>Storage growth over time</h3>
-          <span>Brighter cells = more bytes added</span>
+          <span>{hasRealLibrary ? "Approximate — derived from file mtime" : "Brighter cells = more bytes added"}</span>
         </div>
         <Heatmap />
       </section>
@@ -241,11 +249,11 @@ export function CleanupView({ setView, showConfidence = true }: Props) {
       <section className="cleanup-safe">
         <div className="safe-row">
           <div className="safe-tag"><IconKeep size={14} /> Privacy-first</div>
-          <p>Nothing leaves your machine. Embeddings, hashes and OCR text are stored locally in <code>~/.lumen/index.sqlite</code>.</p>
+          <p>Nothing leaves your machine. Hashes, thumbnails and metadata stay in your browser — never uploaded.</p>
         </div>
         <div className="safe-row">
-          <div className="safe-tag"><IconRestore size={14} /> Always reversible</div>
-          <p>Every destructive action goes into a recoverable Trash for 30 days. <a>Operation history</a></p>
+          <div className="safe-tag"><IconRestore size={14} /> Read-only</div>
+          <p>Lumen on the web is analysis-only. Real moves/renames require the desktop app — see the repo for setup.</p>
         </div>
       </section>
     </div>

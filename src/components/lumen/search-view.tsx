@@ -2,7 +2,7 @@
 
 import { PhotoCard } from "./photo-card";
 import { IconFace, IconHash, IconSearch, IconSparkle, IconX } from "./icons";
-import { PHOTOS, SEARCH_SUGS, SEMANTIC_RESULTS } from "@/lib/lumen/data";
+import { SEARCH_SUGS, type Photo } from "@/lib/lumen/data";
 import type { GridStyle } from "./types";
 
 interface Props {
@@ -11,30 +11,37 @@ interface Props {
   gridStyle: GridStyle;
   useMock?: boolean;
   showConfidence?: boolean;
+  photos: Photo[];
+  semanticMap: Record<string, string[]>;
 }
 
-export function SearchView({ query, setQuery, gridStyle, useMock = false, showConfidence = true }: Props) {
+export function SearchView({ query, setQuery, gridStyle, useMock = false, showConfidence = true, photos, semanticMap }: Props) {
   const q = query.toLowerCase().trim();
-  const hits = SEMANTIC_RESULTS[q] || [];
-  const matched = hits
-    .map((uid) => PHOTOS.find((p) => p.uid === uid && p.cat === "photo"))
-    .filter((p): p is NonNullable<typeof p> => Boolean(p));
-  const fallback = !SEMANTIC_RESULTS[q] && q
-    ? PHOTOS.filter((p) =>
-        p.cat === "photo" && (
-          p.tags.some((t) => t.includes(q)) ||
-          p.location.toLowerCase().includes(q) ||
-          (p.event || "").toLowerCase().includes(q)
-        ),
-      )
-    : [];
-  const results = matched.length ? matched : fallback;
+
+  // 1. exact-key match in semantic map
+  // 2. fallback: substring across filename/location/event/tags
+  let results: Photo[] = [];
+  if (q) {
+    const hits = semanticMap[q];
+    if (hits && hits.length > 0) {
+      results = hits
+        .map((uid) => photos.find((p) => p.uid === uid))
+        .filter((p): p is Photo => Boolean(p));
+    } else {
+      results = photos.filter((p) =>
+        p.filename.toLowerCase().includes(q) ||
+        p.tags.some((t) => t.includes(q)) ||
+        p.location.toLowerCase().includes(q) ||
+        (p.event || "").toLowerCase().includes(q),
+      );
+    }
+  }
 
   return (
     <div className="view">
       {!q ? (
         <div className="search-hero">
-          <div className="sh-eyebrow">Local semantic search · CLIP + OCR + EXIF</div>
+          <div className="sh-eyebrow">Local semantic search · filename + path tokens</div>
           <h2 className="sh-headline">Find any moment in your library.</h2>
           <p className="sh-sub">
             Try natural language — Lumen searches by what&apos;s <em>in</em> the photo, not just the filename.
@@ -75,7 +82,7 @@ export function SearchView({ query, setQuery, gridStyle, useMock = false, showCo
           <div className="sr-head">
             <div>
               <h3 className="sr-q">&quot;{q}&quot;</h3>
-              <p className="sr-meta">{results.length} matches · ranked by CLIP cosine similarity</p>
+              <p className="sr-meta">{results.length} matches</p>
             </div>
             <button className="btn ghost" onClick={() => setQuery("")}>
               <IconX size={13} /> Clear
