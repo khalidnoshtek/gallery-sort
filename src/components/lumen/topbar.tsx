@@ -2,8 +2,8 @@
 
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
-  IconSearch, IconMasonry, IconGrid, IconList, IconRefresh, IconSettings,
-  IconX, IconWand, IconStar, IconFolder, IconTrash,
+  IconSearch, IconMasonry, IconGrid, IconList, IconRefresh,
+  IconX, IconFolder, IconTrash,
 } from "./icons";
 import type { GridStyle, View } from "./types";
 
@@ -11,9 +11,8 @@ interface Props {
   view: View;
   gridStyle: GridStyle;
   setGridStyle: (g: GridStyle) => void;
-  onRename: () => void;
-  selectedCount: number;
   onClearSel: () => void;
+  selectedCount: number;
   query: string;
   setQuery: (q: string) => void;
   photoCount: number;
@@ -27,31 +26,19 @@ const TITLES: Record<View, string> = {
   timeline: "Timeline",
   cleanup: "Cleanup",
   dups: "Duplicates",
-  quality: "Quality review",
   trash: "Trash",
-  suggest: "AI Suggestions",
   search: "Search",
-  event: "Memory",
 };
 
 export function Topbar({
-  view, gridStyle, setGridStyle, onRename, selectedCount, onClearSel, query, setQuery,
+  view, gridStyle, setGridStyle, onClearSel, selectedCount, query, setQuery,
   photoCount, dupGroupCount, reclaimable, isReal,
 }: Props) {
   const subForView = () => {
-    if (view === "library") {
-      return isReal
-        ? `${fmtCount(photoCount)} items indexed`
-        : `Sample · ${fmtCount(photoCount)} items shown`;
-    }
-    if (view === "cleanup") {
-      return reclaimable > 0
-        ? `${fmtBytes(reclaimable)} reclaimable across ${6} categories`
-        : "Scan a folder to see cleanup recommendations";
-    }
-    if (view === "dups") {
-      return `${dupGroupCount} group${dupGroupCount === 1 ? "" : "s"} detected`;
-    }
+    if (!isReal) return null;
+    if (view === "library") return `${fmtCount(photoCount)} items indexed`;
+    if (view === "cleanup") return reclaimable > 0 ? `${fmtBytes(reclaimable)} reclaimable` : "Nothing to clean up";
+    if (view === "dups") return `${dupGroupCount} group${dupGroupCount === 1 ? "" : "s"}`;
     return null;
   };
   const sub = subForView();
@@ -68,21 +55,21 @@ export function Topbar({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search photos, faces, places, OCR text…"
+          placeholder={isReal ? "Search filename, path, location…" : "Scan a folder to enable search"}
+          disabled={!isReal}
         />
         <kbd>⌘K</kbd>
       </div>
 
       <div className="tb-tools">
-        {(view === "library" || view === "event" || view === "search") && (
+        {isReal && (view === "library" || view === "search") && (
           <div className="seg">
             <button data-on={gridStyle === "masonry" ? "1" : "0"} onClick={() => setGridStyle("masonry")} title="Masonry"><IconMasonry size={14} /></button>
             <button data-on={gridStyle === "uniform" ? "1" : "0"} onClick={() => setGridStyle("uniform")} title="Uniform grid"><IconGrid size={14} /></button>
             <button data-on={gridStyle === "timeline" ? "1" : "0"} onClick={() => setGridStyle("timeline")} title="Timeline"><IconList size={14} /></button>
           </div>
         )}
-        <button className="tb-btn ghost" title="Refresh"><IconRefresh size={15} /></button>
-        <button className="tb-btn ghost" title="Settings"><IconSettings size={15} /></button>
+        <button className="tb-btn ghost" title="Rescan"><IconRefresh size={15} /></button>
       </div>
 
       {selectedCount > 0 && (
@@ -90,8 +77,6 @@ export function Topbar({
           <button className="sel-x" onClick={onClearSel}><IconX size={13} /></button>
           <span className="sel-count">{selectedCount} selected</span>
           <div className="sel-actions">
-            <button className="sel-act" onClick={onRename}><IconWand size={13} /> Batch rename</button>
-            <button className="sel-act"><IconStar size={13} /> Favorite</button>
             <button className="sel-act"><IconFolder size={13} /> Move to album</button>
             <button className="sel-act danger"><IconTrash size={13} /> Move to Trash</button>
           </div>

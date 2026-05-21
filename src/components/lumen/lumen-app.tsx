@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLibraryStore } from "@/state/library-store";
-import { PHOTOS, DUP_GROUPS, CLEANUP, SEMANTIC_RESULTS } from "@/lib/lumen/data";
 import { adaptPhotos, adaptDuplicates, computeCleanup, buildSemanticMap } from "@/lib/lumen/adapter";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
@@ -10,22 +9,17 @@ import { LibraryView } from "./library-view";
 import { CleanupView } from "./cleanup-view";
 import { DupView } from "./dup-view";
 import { SearchView } from "./search-view";
-import { SuggestView } from "./suggest-view";
-import { QualityView } from "./quality-view";
 import { TrashView } from "./trash-view";
-import { EventView } from "./event-view";
 import { ScanModal } from "./scan-modal";
-import { RenameModal } from "./rename-modal";
+import { EmptyState } from "./empty-state";
 import type { GridStyle, View } from "./types";
 
 export function LumenApp() {
   const [view, setView] = useState<View>("library");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [selectedAlbum, setSelectedAlbum] = useState("e1");
   const [query, setQuery] = useState("");
   const [gridStyle, setGridStyle] = useState<GridStyle>("timeline");
   const [showScan, setShowScan] = useState(false);
-  const [showRename, setShowRename] = useState(false);
 
   const summary = useLibraryStore((s) => s.summary);
   const realItems = useLibraryStore((s) => s.items);
@@ -35,25 +29,23 @@ export function LumenApp() {
 
   const hasRealLibrary = realItems.length > 0;
 
-  // Active dataset — real if scanned, mock otherwise. The Lumen views never
-  // know which one they're showing; they just render whatever they get.
   const activePhotos = useMemo(
-    () => (hasRealLibrary ? adaptPhotos(realItems) : PHOTOS),
+    () => (hasRealLibrary ? adaptPhotos(realItems) : []),
     [hasRealLibrary, realItems],
   );
 
   const activeDupGroups = useMemo(
-    () => (hasRealLibrary ? adaptDuplicates([...realExact, ...realNear], realItems) : DUP_GROUPS),
+    () => (hasRealLibrary ? adaptDuplicates([...realExact, ...realNear], realItems) : []),
     [hasRealLibrary, realExact, realNear, realItems],
   );
 
   const activeCleanup = useMemo(
-    () => (hasRealLibrary ? computeCleanup(realItems, realExact, realNear) : CLEANUP),
+    () => (hasRealLibrary ? computeCleanup(realItems, realExact, realNear) : null),
     [hasRealLibrary, realItems, realExact, realNear],
   );
 
   const activeSemanticMap = useMemo(
-    () => (hasRealLibrary ? buildSemanticMap(activePhotos) : SEMANTIC_RESULTS),
+    () => (hasRealLibrary ? buildSemanticMap(activePhotos) : {}),
     [hasRealLibrary, activePhotos],
   );
 
@@ -75,9 +67,13 @@ export function LumenApp() {
   }, []);
 
   useEffect(() => {
-    if (query && view !== "search") setView("search");
+    if (query && view !== "search" && hasRealLibrary) setView("search");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
+
+  useEffect(() => {
+    if (!hasRealLibrary && view !== "trash") setView("library");
+  }, [hasRealLibrary, view]);
 
   const switchView = (v: View) => {
     if (v !== "search") setQuery("");
@@ -85,49 +81,45 @@ export function LumenApp() {
     setSelected(new Set());
   };
 
-  const selectedPhotos = activePhotos.filter((p) => selected.has(p.id));
-
   let body: React.ReactNode;
-  switch (view) {
-    case "library":
-      body = (
-        <LibraryView photos={activePhotos} selected={selected} setSelected={setSelected}
-                     gridStyle={gridStyle} showConfidence useMock={false} />
-      );
-      break;
-    case "timeline":
-      body = (
-        <LibraryView photos={activePhotos} selected={selected} setSelected={setSelected}
-                     gridStyle="timeline" showConfidence useMock={false} />
-      );
-      break;
-    case "cleanup":
-      body = <CleanupView setView={switchView} showConfidence cleanup={activeCleanup} hasRealLibrary={hasRealLibrary} />;
-      break;
-    case "dups":
-      body = <DupView groups={activeDupGroups} />;
-      break;
-    case "search":
-      body = (
-        <SearchView query={query} setQuery={setQuery}
-                    photos={activePhotos} semanticMap={activeSemanticMap}
-                    gridStyle={gridStyle} useMock={false} showConfidence />
-      );
-      break;
-    case "suggest":
-      body = <SuggestView />;
-      break;
-    case "quality":
-      body = <QualityView photos={activePhotos} useMock={false} />;
-      break;
-    case "trash":
-      body = <TrashView />;
-      break;
-    case "event":
-      body = <EventView albumId={selectedAlbum} gridStyle={gridStyle} useMock={false} showConfidence />;
-      break;
-    default:
-      body = null;
+
+  if (!hasRealLibrary && view !== "trash") {
+    body = <EmptyState onScan={() => setShowScan(true)} />;
+  } else {
+    switch (view) {
+      case "library":
+        body = (
+          <LibraryView photos={activePhotos} selected={selected} setSelected={setSelected}
+                       gridStyle={gridStyle} useMock={false} />
+        );
+        break;
+      case "timeline":
+        body = (
+          <LibraryView photos={activePhotos} selected={selected} setSelected={setSelected}
+                       gridStyle="timeline" useMock={false} />
+        );
+        break;
+      case "cleanup":
+        body = activeCleanup
+          ? <CleanupView setView={switchView} cleanup={activeCleanup} />
+          : null;
+        break;
+      case "dups":
+        body = <DupView groups={activeDupGroups} />;
+        break;
+      case "search":
+        body = (
+          <SearchView query={query} setQuery={setQuery}
+                      photos={activePhotos} semanticMap={activeSemanticMap}
+                      gridStyle={gridStyle} useMock={false} />
+        );
+        break;
+      case "trash":
+        body = <TrashView />;
+        break;
+      default:
+        body = null;
+    }
   }
 
   return (
@@ -137,27 +129,24 @@ export function LumenApp() {
           <Sidebar
             view={view}
             setView={switchView}
-            selectedAlbum={selectedAlbum}
-            setSelectedAlbum={setSelectedAlbum}
             onScan={() => setShowScan(true)}
             realLibrary={realLibraryInfo}
             onClearLibrary={hasRealLibrary ? clearLibrary : undefined}
             dupGroupCount={activeDupGroups.length}
-            reclaimable={activeCleanup.reclaim}
+            reclaimable={activeCleanup?.reclaim ?? 0}
           />
           <div className="main">
             <Topbar
               view={view}
               gridStyle={gridStyle}
               setGridStyle={setGridStyle}
-              onRename={() => selected.size && setShowRename(true)}
               onClearSel={() => setSelected(new Set())}
               selectedCount={selected.size}
               query={query}
               setQuery={setQuery}
               photoCount={activePhotos.length}
               dupGroupCount={activeDupGroups.length}
-              reclaimable={activeCleanup.reclaim}
+              reclaimable={activeCleanup?.reclaim ?? 0}
               isReal={hasRealLibrary}
             />
             <div className="content">{body}</div>
@@ -167,13 +156,6 @@ export function LumenApp() {
             <ScanModal
               onClose={() => setShowScan(false)}
               onComplete={() => { setShowScan(false); switchView("library"); }}
-            />
-          )}
-          {showRename && (
-            <RenameModal
-              photos={selectedPhotos.length ? selectedPhotos : activePhotos.slice(0, 12)}
-              onClose={() => setShowRename(false)}
-              useMock={false}
             />
           )}
         </div>

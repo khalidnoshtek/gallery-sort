@@ -14,7 +14,6 @@ interface Props {
   selected: Set<string>;
   setSelected: Dispatch<SetStateAction<Set<string>>>;
   gridStyle: GridStyle;
-  showConfidence?: boolean;
   useMock?: boolean;
 }
 
@@ -27,7 +26,7 @@ interface DragState {
   start: Set<string>;
 }
 
-export function LibraryView({ photos, selected, setSelected, gridStyle, showConfidence = true, useMock = false }: Props) {
+export function LibraryView({ photos, selected, setSelected, gridStyle, useMock = false }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
 
@@ -103,7 +102,7 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, showConf
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(p);
     });
-    return [...map.entries()];
+    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [photos]);
 
   const heightFor = (i: number) => {
@@ -132,17 +131,12 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, showConf
             <header className="tl-head">
               <div>
                 <div className="tl-month">{month}</div>
-                <div className="tl-sub">{items.length} photos · {items[0]!.location}</div>
-              </div>
-              <div className="tl-events">
-                {[...new Set(items.map((i) => i.event).filter(Boolean))].slice(0, 2).map((e) => (
-                  <span key={e as string} className="tl-event-chip">{e}</span>
-                ))}
+                <div className="tl-sub">{items.length} photo{items.length === 1 ? "" : "s"}</div>
               </div>
             </header>
             <div className="lib-grid uniform">
               {items.map((p) => (
-                <PhotoCard key={p.id} photo={p} selected={selected.has(p.id)} onToggle={toggle} height={180} showConfidence={showConfidence} useMock={useMock} />
+                <PhotoCard key={p.id} photo={p} selected={selected.has(p.id)} onToggle={toggle} height={180} useMock={useMock} />
               ))}
             </div>
           </section>
@@ -156,7 +150,7 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, showConf
     <div ref={containerRef} className="lib-scroll" onMouseDown={onMouseDown}>
       <div className={`lib-grid ${gridStyle}`}>
         {photos.map((p, i) => (
-          <PhotoCard key={p.id} photo={p} selected={selected.has(p.id)} onToggle={toggle} height={heightFor(i)} showConfidence={showConfidence} useMock={useMock} />
+          <PhotoCard key={p.id} photo={p} selected={selected.has(p.id)} onToggle={toggle} height={heightFor(i)} useMock={useMock} />
         ))}
       </div>
       {dragRect}

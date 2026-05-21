@@ -10,12 +10,11 @@ interface Props {
   setQuery: (q: string) => void;
   gridStyle: GridStyle;
   useMock?: boolean;
-  showConfidence?: boolean;
   photos: Photo[];
   semanticMap: Record<string, string[]>;
 }
 
-export function SearchView({ query, setQuery, gridStyle, useMock = false, showConfidence = true, photos, semanticMap }: Props) {
+export function SearchView({ query, setQuery, gridStyle, useMock = false, photos, semanticMap }: Props) {
   const q = query.toLowerCase().trim();
 
   // 1. exact-key match in semantic map
@@ -102,7 +101,6 @@ export function SearchView({ query, setQuery, gridStyle, useMock = false, showCo
                   selected={false}
                   onToggle={() => {}}
                   height={gridStyle === "uniform" ? 180 : [180, 220, 200, 260, 180, 240, 200, 220][i % 8]}
-                  showConfidence={showConfidence}
                   useMock={useMock}
                 />
               ))}

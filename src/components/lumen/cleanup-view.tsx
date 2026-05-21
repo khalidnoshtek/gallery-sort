@@ -2,7 +2,7 @@
 
 import { fmtBytes, fmtCount, type CleanupBucket, type CleanupSummary } from "@/lib/lumen/data";
 import {
-  IconBroom, IconSparkle, IconDrive, IconDup, IconWA, IconShot, IconBlur, IconBurst, IconVideo,
+  IconBroom, IconDrive, IconDup, IconWA, IconShot, IconBlur, IconBurst, IconVideo,
   IconFile, IconArrowR, IconKeep, IconRestore,
 } from "./icons";
 import type { View } from "./types";
@@ -26,20 +26,17 @@ const BUCKET_ICONS: Record<CleanupBucket["id"], ComponentType<{ size?: number }>
   large: IconVideo,
 };
 
-function BucketCard({ bucket, onOpen, showConfidence }: { bucket: CleanupBucket; onOpen: () => void; showConfidence?: boolean }) {
+function BucketCard({ bucket, onOpen }: { bucket: CleanupBucket; onOpen: () => void }) {
   const c = BUCKET_COLORS[bucket.color]!;
   const Ic = BUCKET_ICONS[bucket.id] ?? IconFile;
   return (
-    <button className="bucket" onClick={onOpen}>
+    <button className="bucket" onClick={onOpen} disabled={bucket.count === 0} style={{ opacity: bucket.count === 0 ? 0.45 : 1 }}>
       <div className="bucket-icon" style={{ background: c.bg, color: c.fg }}>
         <Ic size={22} />
       </div>
       <div>
         <div className="bucket-top">
           <h3 className="bucket-label">{bucket.label}</h3>
-          {showConfidence && (
-            <span className="bucket-conf" style={{ color: c.fg }}>{Math.round(bucket.confidence * 100)}% conf.</span>
-          )}
         </div>
         <p className="bucket-desc">{bucket.desc}</p>
         <div className="bucket-stats">
@@ -48,10 +45,12 @@ function BucketCard({ bucket, onOpen, showConfidence }: { bucket: CleanupBucket;
           <span className="bucket-save" style={{ color: c.fg }}>{fmtBytes(bucket.size)}</span>
         </div>
       </div>
-      <div className="bucket-cta">
-        <span>Review</span>
-        <IconArrowR size={13} />
-      </div>
+      {bucket.count > 0 && (
+        <div className="bucket-cta">
+          <span>Review</span>
+          <IconArrowR size={13} />
+        </div>
+      )}
     </button>
   );
 }
@@ -63,7 +62,7 @@ function StorageBar({ buckets, total }: { buckets: CleanupBucket[]; total: numbe
   return (
     <div className="storage-bar">
       <div className="sbar-track">
-        {buckets.map((b) => {
+        {buckets.filter((b) => b.size > 0).map((b) => {
           const w = (b.size / total) * 100;
           const c = BUCKET_COLORS[b.color]!;
           return (
@@ -77,7 +76,7 @@ function StorageBar({ buckets, total }: { buckets: CleanupBucket[]; total: numbe
         })}
       </div>
       <div className="sbar-legend">
-        {buckets.map((b) => {
+        {buckets.filter((b) => b.size > 0).map((b) => {
           const c = BUCKET_COLORS[b.color]!;
           return (
             <div key={b.id} className="sbar-leg-item">
@@ -92,84 +91,64 @@ function StorageBar({ buckets, total }: { buckets: CleanupBucket[]; total: numbe
   );
 }
 
-function Heatmap() {
-  const rows = 4;
-  const cols = 18;
-  const cells: number[] = [];
-  let seed = 7;
-  for (let i = 0; i < rows * cols; i++) {
-    seed = (seed * 9301 + 49297) % 233280;
-    const r = seed / 233280;
-    cells.push(0.06 + r * 0.55);
-  }
-  return (
-    <div className="heatmap">
-      <div className="heatmap-grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
-        {cells.map((intensity, i) => (
-          <div key={i} className="heat-cell" style={{ background: `rgba(244,242,239,${intensity})` }} />
-        ))}
-      </div>
-      <div className="heatmap-axis">
-        <span>Jul &apos;23</span>
-        <span>Jan &apos;24</span>
-        <span>Jul &apos;24</span>
-        <span>Now</span>
-      </div>
-    </div>
-  );
-}
-
 interface Props {
   setView: (v: View) => void;
-  showConfidence?: boolean;
   cleanup: CleanupSummary;
-  hasRealLibrary: boolean;
 }
 
-export function CleanupView({ setView, showConfidence = true, cleanup, hasRealLibrary }: Props) {
-  const total = cleanup.buckets.reduce((a, b) => a + b.size, 0);
+export function CleanupView({ setView, cleanup }: Props) {
+  const buckets = cleanup.buckets;
+  const total = buckets.reduce((a, b) => a + b.size, 0);
   const photoBytes = cleanup.photosUsed;
   const reclaimGb = cleanup.reclaim / 1024 ** 3;
+  const reclaimMb = cleanup.reclaim / 1024 ** 2;
+  const showAsGb = reclaimGb >= 1;
+  const heroNum = showAsGb
+    ? (reclaimGb >= 100 ? reclaimGb.toFixed(0) : reclaimGb.toFixed(1))
+    : (reclaimMb >= 100 ? reclaimMb.toFixed(0) : reclaimMb.toFixed(1));
+  const heroUnit = showAsGb ? "GB" : "MB";
 
-  const recs = [
-    { id: "r1", text: `Trash ${fmtCount(cleanup.buckets.find((b) => b.id === "dups")?.count ?? 0)} duplicate files. Free up ${fmtBytes(cleanup.buckets.find((b) => b.id === "dups")?.size ?? 0)}.`, primary: "Review", icon: IconDup },
-    { id: "r2", text: `Move ${fmtCount(cleanup.buckets.find((b) => b.id === "shots")?.count ?? 0)} screenshots into a separate album.`, primary: "Apply", icon: IconShot },
-    { id: "r3", text: `${fmtCount(cleanup.buckets.find((b) => b.id === "ws")?.count ?? 0)} WhatsApp/messenger files detected — likely safe to clear.`, primary: "Preview", icon: IconWA },
-  ];
-
-  const subEyebrow = hasRealLibrary
-    ? `${fmtCount(cleanup.totalScanned)} files indexed in this session`
-    : "Sample library · scan your folder to see real numbers";
+  const populatedBuckets = buckets.filter((b) => b.count > 0);
+  const hasAnything = populatedBuckets.length > 0;
 
   return (
     <div className="view">
       <section className="cleanup-hero">
         <div>
-          <div className="ch-eyebrow">{subEyebrow}</div>
+          <div className="ch-eyebrow">{fmtCount(cleanup.totalScanned)} files indexed in this session</div>
           <h2 className="ch-headline">
-            <span className="ch-num">{reclaimGb >= 100 ? reclaimGb.toFixed(0) : reclaimGb.toFixed(1)}</span>
-            <span className="ch-unit">GB</span>
+            <span className="ch-num">{heroNum}</span>
+            <span className="ch-unit">{heroUnit}</span>
             <span className="ch-tag">reclaimable</span>
           </h2>
           <p className="ch-sub">
-            Across <strong>{cleanup.buckets.length} categories</strong>. Every file is staged, never deleted —
-            review each bucket and confirm before anything moves.
+            {hasAnything ? (
+              <>
+                Across <strong>{populatedBuckets.length} categor{populatedBuckets.length === 1 ? "y" : "ies"}</strong>.
+                The web build is analysis-only — open the desktop app to actually move files. Everything you
+                see is computed locally; nothing was uploaded.
+              </>
+            ) : (
+              <>
+                Nothing flagged. Your library is already clean — no exact or near-duplicates, no obvious
+                screenshot/messenger junk.
+              </>
+            )}
           </p>
-          <div className="ch-actions">
-            <button className="btn primary" onClick={() => setView("dups")}>
-              <IconBroom size={14} /> Start cleanup review
-            </button>
-            <button className="btn ghost">
-              <IconSparkle size={14} /> Apply all AI recommendations
-            </button>
-          </div>
+          {hasAnything && (
+            <div className="ch-actions">
+              <button className="btn primary" onClick={() => setView("dups")}>
+                <IconBroom size={14} /> Review duplicates
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="ch-right">
           <div className="ch-disk">
             <div className="ch-disk-label">
               <IconDrive size={14} />
-              <span>{hasRealLibrary ? "Library size" : "Samsung T7 SSD · 512 GB"}</span>
+              <span>Library size</span>
             </div>
             <div className="ch-disk-ring">
               <svg viewBox="0 0 120 120">
@@ -181,79 +160,53 @@ export function CleanupView({ setView, showConfidence = true, cleanup, hasRealLi
                   fill="none"
                   stroke="var(--accent)"
                   strokeWidth="10"
-                  strokeDasharray={`${hasRealLibrary ? 220 : (389 / 512) * 314} 314`}
+                  strokeDasharray={`${Math.min(314, (cleanup.reclaim / Math.max(1, photoBytes)) * 314)} 314`}
                   strokeLinecap="round"
                   transform="rotate(-90 60 60)"
                 />
               </svg>
               <div className="ch-disk-center">
-                <div className="ch-disk-used">{hasRealLibrary ? fmtBytes(photoBytes) : "389 GB"}</div>
-                <div className="ch-disk-of">{hasRealLibrary ? `${fmtCount(cleanup.totalScanned)} files` : "of 512 GB"}</div>
+                <div className="ch-disk-used">{fmtBytes(photoBytes)}</div>
+                <div className="ch-disk-of">{fmtCount(cleanup.totalScanned)} files</div>
               </div>
             </div>
             <div className="ch-disk-meta">
-              <div><span className="ch-dot photos" />Photos<b>{hasRealLibrary ? fmtBytes(photoBytes) : "248 GB"}</b></div>
+              <div><span className="ch-dot photos" />Total<b>{fmtBytes(photoBytes)}</b></div>
               <div><span className="ch-dot other" />Reclaim<b>{fmtBytes(cleanup.reclaim)}</b></div>
-              <div><span className="ch-dot free" />Dup groups<b>{fmtCount((cleanup.buckets.find((b) => b.id === "dups")?.count ?? 0))}</b></div>
+              <div><span className="ch-dot free" />Dup groups<b>{fmtCount((buckets.find((b) => b.id === "dups")?.count ?? 0))}</b></div>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="cleanup-storage">
-        <div className="section-head">
-          <h3>By category</h3>
-          <span>Tap any to review and stage actions</span>
-        </div>
-        <StorageBar buckets={cleanup.buckets} total={total} />
-      </section>
+      {total > 0 && (
+        <section className="cleanup-storage">
+          <div className="section-head">
+            <h3>By category</h3>
+            <span>Tap any bucket to review</span>
+          </div>
+          <StorageBar buckets={buckets} total={total} />
+        </section>
+      )}
 
       <section className="cleanup-buckets">
-        {cleanup.buckets.map((b) => (
+        {buckets.map((b) => (
           <BucketCard
             key={b.id}
             bucket={b}
-            showConfidence={showConfidence}
-            onOpen={() => (b.id === "dups" ? setView("dups") : undefined)}
+            onOpen={() => (b.id === "dups" || b.id === "burst" ? setView("dups") : undefined)}
           />
         ))}
-      </section>
-
-      <section className="cleanup-recs">
-        <div className="section-head">
-          <h3>Smart recommendations</h3>
-          <span>Conservative defaults · everything is dry-run first</span>
-        </div>
-        <div className="recs-list">
-          {recs.map((r) => (
-            <article key={r.id} className="rec">
-              <div className="rec-ic"><r.icon size={18} /></div>
-              <div className="rec-body">{r.text}</div>
-              <div className="rec-actions">
-                <button className="btn-sm ghost">Dismiss</button>
-                <button className="btn-sm primary">{r.primary}</button>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="cleanup-heat">
-        <div className="section-head">
-          <h3>Storage growth over time</h3>
-          <span>{hasRealLibrary ? "Approximate — derived from file mtime" : "Brighter cells = more bytes added"}</span>
-        </div>
-        <Heatmap />
       </section>
 
       <section className="cleanup-safe">
         <div className="safe-row">
           <div className="safe-tag"><IconKeep size={14} /> Privacy-first</div>
-          <p>Nothing leaves your machine. Hashes, thumbnails and metadata stay in your browser — never uploaded.</p>
+          <p>Hashes, thumbnails and metadata stay in your browser — never uploaded. Open DevTools → Network during a scan to verify.</p>
         </div>
         <div className="safe-row">
-          <div className="safe-tag"><IconRestore size={14} /> Read-only</div>
-          <p>Lumen on the web is analysis-only. Real moves/renames require the desktop app — see the repo for setup.</p>
+          <div className="safe-tag"><IconRestore size={14} /> Read-only on the web</div>
+          <p>Lumen on the web analyses; it can&apos;t move or delete files. For actual cleanup, run the desktop build (see the repo README).</p>
         </div>
       </section>
     </div>
