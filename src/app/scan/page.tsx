@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { IS_DEMO } from "@/lib/demo/data";
+import { DemoBanner } from "@/components/layout/demo-banner";
 
 export default function ScanPage() {
   const router = useRouter();
@@ -12,6 +14,10 @@ export default function ScanPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (IS_DEMO) {
+      setErr("This is the demo — scanning a real folder requires running the app locally. See README.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -31,6 +37,7 @@ export default function ScanPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-8 py-12">
+      <DemoBanner />
       <h1 className="text-2xl font-semibold">Add a library</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Point at a folder on your SSD, external drive, or local disk. The scan reads only; no files are moved.

@@ -1,6 +1,7 @@
-import { rawDb } from "@/lib/db/raw";
 import { formatBytes } from "@/lib/utils";
 import { UndoButton } from "@/components/operations/undo-button";
+import { DemoBanner } from "@/components/layout/demo-banner";
+import { IS_DEMO, demoOperations } from "@/lib/demo/data";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +17,13 @@ interface Op {
   undoneAt: string | null;
 }
 
-function loadOps(limit = 100): Op[] {
+function loadOps(): Op[] {
+  if (IS_DEMO) return demoOperations() as Op[];
+  const { rawDb } = require("@/lib/db/raw") as typeof import("@/lib/db/raw");
   const db = rawDb();
   const rows = db
-    .prepare(`SELECT id, kind, status, summary, itemCount, bytesAffected, createdAt, finishedAt, undoneAt FROM Operation ORDER BY createdAt DESC LIMIT ?`)
-    .all(limit) as Array<Omit<Op, "bytesAffected"> & { bytesAffected: bigint }>;
+    .prepare(`SELECT id, kind, status, summary, itemCount, bytesAffected, createdAt, finishedAt, undoneAt FROM Operation ORDER BY createdAt DESC LIMIT 100`)
+    .all() as Array<Omit<Op, "bytesAffected"> & { bytesAffected: bigint }>;
   return rows.map((r) => ({ ...r, bytesAffected: r.bytesAffected.toString() }));
 }
 
@@ -32,6 +35,7 @@ export default function OperationsPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-6">
+      <DemoBanner />
       <h1 className="text-2xl font-semibold">Operations history</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Every destructive action ever taken. Each one is undoable until the trash is purged.

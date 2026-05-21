@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatBytes } from "@/lib/utils";
+import { IS_DEMO, BASE_PATH } from "@/lib/demo/data";
 
 interface Group {
   id: string;
@@ -20,6 +21,7 @@ interface Member {
   path: string;
   sizeBytes: string;
   thumbId: string | null;
+  thumbSlug?: string;
 }
 
 export function DuplicateGroupView({ group, members }: { group: Group; members: Member[] }) {
@@ -32,6 +34,7 @@ export function DuplicateGroupView({ group, members }: { group: Group; members: 
   });
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [trashedIds, setTrashedIds] = useState<Set<string>>(new Set());
 
   function toggle(id: string) {
     const next = new Set(selected);
@@ -44,19 +47,32 @@ export function DuplicateGroupView({ group, members }: { group: Group; members: 
     if (selected.size === 0) return;
     setBusy(true);
     try {
-      const res = await fetch("/api/ops", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          intent: { kind: "TRASH", mediaIds: [...selected], reason: `Duplicate group ${group.id}` },
-          confirm,
-        }),
-      });
-      const data = await res.json();
-      if (!confirm) {
-        setResult(`Dry-run: ${data.plan.ops.length} file(s), ${formatBytes(BigInt(data.plan.totalBytes))} to trash`);
-      } else if (data.executed) {
-        setResult(`Trashed ${data.result.succeeded} · failed ${data.result.failed}. Undo from History.`);
+      if (IS_DEMO) {
+        await new Promise((r) => setTimeout(r, 350));
+        const total = members
+          .filter((m) => selected.has(m.mediaId))
+          .reduce<bigint>((a, m) => a + BigInt(m.sizeBytes), 0n);
+        if (!confirm) {
+          setResult(`Dry-run: ${selected.size} file(s), ${formatBytes(total)} would move to Trash.`);
+        } else {
+          setTrashedIds(new Set(selected));
+          setResult(`Trashed ${selected.size} file(s) · ${formatBytes(total)} recovered. Undo from History.`);
+        }
+      } else {
+        const res = await fetch("/api/ops", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            intent: { kind: "TRASH", mediaIds: [...selected], reason: `Duplicate group ${group.id}` },
+            confirm,
+          }),
+        });
+        const data = await res.json();
+        if (!confirm) {
+          setResult(`Dry-run: ${data.plan.ops.length} file(s), ${formatBytes(BigInt(data.plan.totalBytes))} to trash`);
+        } else if (data.executed) {
+          setResult(`Trashed ${data.result.succeeded} · failed ${data.result.failed}. Undo from History.`);
+        }
       }
     } catch (err) {
       setResult(`Error: ${String(err)}`);
@@ -93,26 +109,36 @@ export function DuplicateGroupView({ group, members }: { group: Group; members: 
         {members.map((m) => {
           const isBest = m.mediaId === group.bestMediaId;
           const isSel = selected.has(m.mediaId);
+          const isTrashed = trashedIds.has(m.mediaId);
+          const src = IS_DEMO
+            ? (m.thumbSlug ? `${BASE_PATH}/demo/thumbs/${m.thumbSlug}.webp` : null)
+            : (m.thumbId ? `/api/media/${m.mediaId}/thumbnail` : null);
           return (
             <div key={m.mediaId} className="space-y-1">
               <button
-                onClick={() => toggle(m.mediaId)}
-                className={`relative block aspect-square w-full overflow-hidden rounded-md border bg-secondary/40 transition ${isSel ? "border-destructive ring-1 ring-destructive/40" : "border-transparent"}`}
+                onClick={() => !isTrashed && toggle(m.mediaId)}
+                disabled={isTrashed}
+                className={`relative block aspect-square w-full overflow-hidden rounded-md border bg-secondary/40 transition ${isSel && !isTrashed ? "border-destructive ring-1 ring-destructive/40" : "border-transparent"} ${isTrashed ? "opacity-30" : ""}`}
               >
-                {m.thumbId ? (
+                {src ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={`/api/media/${m.mediaId}/thumbnail`} alt={m.filename} className="size-full object-cover" loading="lazy" />
+                  <img src={src} alt={m.filename} className="size-full object-cover" loading="lazy" />
                 ) : (
                   <div className="grid size-full place-items-center text-xs text-muted-foreground">{m.filename}</div>
                 )}
-                {isBest && (
+                {isBest && !isTrashed && (
                   <span className="absolute left-1 top-1 rounded bg-emerald-500/90 px-1 py-0.5 text-[9px] font-medium uppercase text-black">
                     keep
                   </span>
                 )}
-                {isSel && (
+                {isSel && !isTrashed && (
                   <span className="absolute right-1 top-1 rounded bg-destructive px-1 py-0.5 text-[9px] font-medium uppercase text-destructive-foreground">
                     trash
+                  </span>
+                )}
+                {isTrashed && (
+                  <span className="absolute inset-x-1 top-1 rounded bg-zinc-700 px-1 py-0.5 text-center text-[9px] font-medium uppercase text-zinc-200">
+                    in trash
                   </span>
                 )}
               </button>

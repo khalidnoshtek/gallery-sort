@@ -1,6 +1,7 @@
-import { rawDb } from "@/lib/db/raw";
 import { formatBytes } from "@/lib/utils";
 import { DuplicateGroupView } from "@/components/duplicates/duplicate-group";
+import { DemoBanner } from "@/components/layout/demo-banner";
+import { IS_DEMO, demoDuplicateGroups } from "@/lib/demo/data";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,38 @@ interface MemberRow {
   path: string;
   sizeBytes: string;
   thumbId: string | null;
+  thumbSlug?: string;
 }
 
-function loadGroups(kind = "EXACT", limit = 50) {
+function loadGroups(kind: "EXACT" | "NEAR") {
+  if (IS_DEMO) {
+    const groups = demoDuplicateGroups(kind);
+    const flatMembers: MemberRow[] = groups.flatMap((g) =>
+      g.members.map((m) => ({
+        groupId: g.id,
+        mediaId: m.mediaId,
+        score: m.score,
+        reason: m.reason,
+        filename: m.filename,
+        path: m.path,
+        sizeBytes: m.sizeBytes,
+        thumbId: m.thumbSlug,
+        thumbSlug: m.thumbSlug,
+      })),
+    );
+    return {
+      groups: groups.map<GroupRow>((g) => ({
+        id: g.id,
+        kind: g.kind,
+        memberCount: g.memberCount,
+        totalBytes: g.totalBytes,
+        bestMediaId: g.bestMediaId,
+        bestPath: g.bestPath,
+      })),
+      members: flatMembers,
+    };
+  }
+  const { rawDb } = require("@/lib/db/raw") as typeof import("@/lib/db/raw");
   const db = rawDb();
   const groups = db
     .prepare(
@@ -33,9 +63,9 @@ function loadGroups(kind = "EXACT", limit = 50) {
          LEFT JOIN MediaItem mi ON mi.id = g.bestMediaId
         WHERE g.kind = ?
         ORDER BY g.totalBytes DESC
-        LIMIT ?`
+        LIMIT 50`
     )
-    .all(kind, limit) as Array<{ id: string; kind: string; memberCount: number; totalBytes: bigint; bestMediaId: string | null; bestPath: string | null }>;
+    .all(kind) as Array<{ id: string; kind: string; memberCount: number; totalBytes: bigint; bestMediaId: string | null; bestPath: string | null }>;
 
   if (groups.length === 0) return { groups: [], members: [] };
 
@@ -61,7 +91,7 @@ function loadGroups(kind = "EXACT", limit = 50) {
 
 export default async function DuplicatesPage({ searchParams }: { searchParams: Promise<{ kind?: string }> }) {
   const sp = await searchParams;
-  const kind = sp.kind === "NEAR" ? "NEAR" : "EXACT";
+  const kind: "EXACT" | "NEAR" = sp.kind === "NEAR" ? "NEAR" : "EXACT";
 
   let data: { groups: GroupRow[]; members: MemberRow[] } = { groups: [], members: [] };
   try {
@@ -78,6 +108,7 @@ export default async function DuplicatesPage({ searchParams }: { searchParams: P
 
   return (
     <div className="px-8 py-6">
+      <DemoBanner />
       <div className="flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Duplicates ({kind === "EXACT" ? "exact" : "near"})</h1>

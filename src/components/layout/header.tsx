@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { IS_DEMO } from "@/lib/demo/data";
 
 export function Header() {
   const [jobs, setJobs] = useState<{ pending: number; running: number } | null>(null);
 
   useEffect(() => {
+    if (IS_DEMO) {
+      setJobs({ pending: 0, running: 0 });
+      return;
+    }
     let alive = true;
     const tick = async () => {
       try {

@@ -1,6 +1,7 @@
-import { rawDb } from "@/lib/db/raw";
-import { formatBytes } from "@/lib/utils";
 import Link from "next/link";
+import { formatBytes } from "@/lib/utils";
+import { IS_DEMO, demoStats } from "@/lib/demo/data";
+import { DemoBanner } from "@/components/layout/demo-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,22 @@ interface Stats {
 }
 
 function getStats(): Stats {
+  if (IS_DEMO) {
+    const d = demoStats();
+    return {
+      totalItems: d.totalItems,
+      totalBytes: BigInt(d.totalBytes),
+      byCategory: d.byCategory.map((c) => ({ category: c.category, n: c.n, bytes: BigInt(c.bytes) })),
+      exactDupGroups: d.exactDupGroups,
+      exactDupBytes: BigInt(d.exactDupBytes),
+      nearDupGroups: d.nearDupGroups,
+      unhashed: d.unhashed,
+      unthumbed: d.unthumbed,
+      pendingJobs: d.pendingJobs,
+    };
+  }
+  // Lazy require — keeps better-sqlite3 out of the static export bundle.
+  const { rawDb } = require("@/lib/db/raw") as typeof import("@/lib/db/raw");
   const db = rawDb();
   const total = db.prepare(`SELECT COUNT(*) as n, COALESCE(SUM(sizeBytes), 0) as b FROM MediaItem WHERE isHidden = 0`).get() as { n: number; b: bigint };
   const byCat = db
@@ -45,12 +62,11 @@ export default function Dashboard() {
   let stats: Stats | null = null;
   try {
     stats = getStats();
-  } catch {
-    // DB not initialized yet
-  }
+  } catch {}
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-10">
+      <DemoBanner />
       <h1 className="text-3xl font-semibold tracking-tight">Library overview</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Privacy-first · everything stays on this device.

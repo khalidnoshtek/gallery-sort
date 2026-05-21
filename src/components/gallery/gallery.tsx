@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { IS_DEMO, BASE_PATH } from "@/lib/demo/data";
 
 interface Item {
   id: string;
@@ -11,6 +12,7 @@ interface Item {
   width: number | null;
   height: number | null;
   thumbId: string | null;
+  thumbSlug?: string;
   category: string;
   intent: string;
 }
@@ -31,7 +33,7 @@ export function Gallery({ items }: { items: Item[] }) {
   });
 
   return (
-    <div ref={parentRef} className="h-[calc(100vh-8rem)] overflow-auto p-3">
+    <div ref={parentRef} className="h-[calc(100vh-10rem)] overflow-auto p-3">
       <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative", width: "100%" }}>
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
           const start = virtualRow.index * COLS;
@@ -66,13 +68,21 @@ export function Gallery({ items }: { items: Item[] }) {
   );
 }
 
+function thumbSrc(item: Item): string | null {
+  if (IS_DEMO) {
+    return item.thumbSlug ? `${BASE_PATH}/demo/thumbs/${item.thumbSlug}.webp` : null;
+  }
+  return item.thumbId ? `/api/media/${item.id}/thumbnail` : null;
+}
+
 function Cell({ item }: { item: Item }) {
+  const src = thumbSrc(item);
   return (
     <div className="group relative aspect-square overflow-hidden rounded-md bg-secondary/50">
-      {item.thumbId ? (
+      {src ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`/api/media/${item.id}/thumbnail`}
+          src={src}
           alt={item.filename}
           loading="lazy"
           decoding="async"
