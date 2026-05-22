@@ -6,13 +6,15 @@ import { buildSuggestions, type RealSuggestion, type SuggestionIcon } from "@/li
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
   IconBroom, IconBurst, IconBlur, IconShot, IconWA, IconVideo,
-  IconFile, IconCheck, IconRefresh, IconArrowR, IconSparkle, IconRestore,
+  IconFile, IconCheck, IconRefresh, IconArrowR, IconSparkle, IconRestore, IconFlash,
 } from "./icons";
+import { DiagnosticsPanel } from "./diagnostics-panel";
 
 const ICON_MAP: Record<SuggestionIcon, ComponentType<{ size?: number }>> = {
   save: IconBroom,
   burst: IconBurst,
   blur: IconBlur,
+  dark: IconFlash,
   shot: IconShot,
   wa: IconWA,
   video: IconVideo,
@@ -57,28 +59,38 @@ export function SuggestView({ setView }: Props) {
       <header className="sg-head">
         <div>
           <div className="sg-eyebrow">
-            {visible.length} suggestion{visible.length === 1 ? "" : "s"} · computed locally from your scan
+            {visible.length > 0
+              ? `${visible.length} actionable suggestion${visible.length === 1 ? "" : "s"} · computed locally from your scan`
+              : "No actionable suggestions yet · expand diagnostics below"}
           </div>
           <h2>What to clean up — your call on each.</h2>
           <p>
-            Recover up to <strong style={{ color: "var(--text)" }}>{fmtBytes(totalPossibleBytes)}</strong> across {fmtCount(visible.reduce((a, s) => a + s.itemIds.length, 0))} files.
-            Staging is reversible — nothing leaves disk until you download and run the cleanup script.
+            {visible.length > 0 ? (
+              <>
+                Up to <strong style={{ color: "var(--text)" }}>{fmtBytes(totalPossibleBytes)}</strong> reclaimable across {fmtCount(visible.reduce((a, s) => a + s.itemIds.length, 0))} files.
+                Staging is reversible — nothing leaves disk until you confirm in Trash.
+              </>
+            ) : (
+              <>Your library is already in pretty good shape — no duplicates, no obvious junk. Run AI analysis to enable semantic search and face clustering, or check the diagnostics panel below.</>
+            )}
           </p>
         </div>
         <div className="sg-head-actions">
           <button className="btn ghost" onClick={() => setDismissed(new Set())}>
             <IconRefresh size={13} /> Reset
           </button>
-          <button className="btn primary" onClick={applyAllSafe} disabled={visible.length === 0}>
-            <IconCheck size={13} /> Stage all safe
+          <button className="btn primary" onClick={applyAllSafe} disabled={visible.length === 0 || !visible.some(s => s.id.startsWith("dups"))}>
+            <IconCheck size={13} /> Stage all duplicates
           </button>
         </div>
       </header>
 
+      <DiagnosticsPanel />
+
       {visible.length === 0 ? (
         <div className="sg-empty">
           <IconSparkle size={26} style={{ color: "var(--good)" }} />
-          <p>Nothing flagged. Your library is already clean — no duplicates, no obvious junk.</p>
+          <p>Nothing flagged. Check the diagnostics above to see what was actually computed.</p>
         </div>
       ) : (
         <>
@@ -102,7 +114,7 @@ export function SuggestView({ setView }: Props) {
                   {fmtCount(staged.size)} file{staged.size === 1 ? "" : "s"} staged for cleanup
                 </div>
                 <div style={{ color: "var(--muted)", fontSize: 12.5 }}>
-                  Review them in Trash. Nothing is deleted until you download and run the script.
+                  Review in Trash. Nothing is deleted until you confirm there.
                 </div>
               </div>
               <button className="btn primary" onClick={() => setView("trash")}>

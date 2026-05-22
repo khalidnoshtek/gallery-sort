@@ -1,20 +1,13 @@
 // In-browser AI — CLIP semantic search + face detection/clustering.
-//
-// Models are loaded lazily on first use and cached in the browser. CLIP
-// fetches from the Hugging Face CDN; face-api fetches from jsdelivr. The
-// first call to each costs ~50-150MB of download. After that, the model
-// lives in the browser's IndexedDB / OPFS and load is ~100ms.
 
 import type { FaceRecord } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────
-// CLIP — image + text embeddings
+// CLIP
 // ─────────────────────────────────────────────────────────────────────
 
 type Tensor = { data: Float32Array | Float64Array | number[] };
 interface ClipModels {
-  // We intentionally keep these as `unknown` — the transformers.js types
-  // are large and re-export awkwardly; we only use the call surfaces.
   tokenizer: (input: string | string[], opts?: Record<string, unknown>) => unknown;
   textModel: (inputs: unknown) => Promise<{ text_embeds: Tensor }>;
   processor: (input: unknown) => Promise<unknown>;
@@ -27,38 +20,61 @@ let clipLoading: Promise<void> | null = null;
 
 const CLIP_MODEL = "Xenova/clip-vit-base-patch32";
 
-export async function loadClip(onProgress?: (msg: string) => void): Promise<void> {
-  if (clipState) return;
-  if (clipLoading) return clipLoading;
+export type AiLogger = (msg: string, kind?: "info" | "warn" | "error") => void;
+
+const consoleLogger: AiLogger = (msg, kind = "info") => {
+  const prefix = "[lumen-ai]";
+  if (kind === "error") console.error(prefix, msg);
+  else if (kind === "warn") console.warn(prefix, msg);
+  else console.log(prefix, msg);
+};
+
+export async function loadClip(log: AiLogger = consoleLogger): Promise<void> {
+  if (clipState) {
+    log("CLIP already loaded");
+    return;
+  }
+  if (clipLoading) {
+    log("CLIP load already in progress, waiting…");
+    return clipLoading;
+  }
   clipLoading = (async () => {
-    onProgress?.("Downloading CLIP model (~150 MB, one-time)…");
-    const mod = await import("@huggingface/transformers");
-    // env config: use CDN cache, browser cache
-    if (mod.env) {
+    try {
+      log("Importing @huggingface/transformers (this can take a moment first time)…");
+      const mod = await import("@huggingface/transformers");
+      log(`transformers imported. exports: ${Object.keys(mod).slice(0, 8).join(", ")}…`);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const env = mod.env as any;
-      env.allowLocalModels = false;
-      env.useBrowserCache = true;
+      const env = (mod as any).env;
+      if (env) {
+        env.allowLocalModels = false;
+        env.useBrowserCache = true;
+      }
+      log(`Downloading ${CLIP_MODEL} (~150 MB total, cached after)…`);
+      const start = performance.now();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const M = mod as any;
+      const tokenizer = await M.AutoTokenizer.from_pretrained(CLIP_MODEL);
+      log("✓ Tokenizer loaded");
+      const processor = await M.AutoProcessor.from_pretrained(CLIP_MODEL);
+      log("✓ Processor loaded");
+      const textModel = await M.CLIPTextModelWithProjection.from_pretrained(CLIP_MODEL);
+      log("✓ Text encoder loaded");
+      const visionModel = await M.CLIPVisionModelWithProjection.from_pretrained(CLIP_MODEL);
+      log("✓ Vision encoder loaded");
+      clipState = {
+        tokenizer,
+        textModel,
+        processor,
+        visionModel,
+        RawImage: M.RawImage,
+      } as ClipModels;
+      log(`CLIP ready in ${((performance.now() - start) / 1000).toFixed(1)}s`);
+    } catch (err) {
+      clipLoading = null;
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`CLIP load FAILED: ${msg}`, "error");
+      throw err;
     }
-    const [tokenizer, textModel, processor, visionModel] = await Promise.all([
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod as any).AutoTokenizer.from_pretrained(CLIP_MODEL),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod as any).CLIPTextModelWithProjection.from_pretrained(CLIP_MODEL),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod as any).AutoProcessor.from_pretrained(CLIP_MODEL),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod as any).CLIPVisionModelWithProjection.from_pretrained(CLIP_MODEL),
-    ]);
-    clipState = {
-      tokenizer,
-      textModel,
-      processor,
-      visionModel,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      RawImage: (mod as any).RawImage,
-    } as ClipModels;
-    onProgress?.("CLIP ready.");
   })();
   return clipLoading;
 }
@@ -80,7 +96,8 @@ export async function clipEncodeImage(bitmap: ImageBitmap): Promise<number[]> {
 export async function clipEncodeText(text: string): Promise<number[]> {
   await loadClip();
   if (!clipState) throw new Error("CLIP not loaded");
-  const inputs = clipState.tokenizer(text, { padding: true, truncation: true });
+  // The tokenizer expects an array of strings for the text path
+  const inputs = clipState.tokenizer([text], { padding: true, truncation: true });
   const { text_embeds } = await clipState.textModel(inputs);
   return l2Normalize(Array.from(text_embeds.data) as number[]);
 }
@@ -93,7 +110,6 @@ function l2Normalize(v: number[]): number[] {
 }
 
 export function cosineSim(a: number[], b: number[]): number {
-  // Vectors are L2-normalized so cosine = dot product.
   let dot = 0;
   const L = Math.min(a.length, b.length);
   for (let i = 0; i < L; i++) dot += a[i]! * b[i]!;
@@ -101,24 +117,41 @@ export function cosineSim(a: number[], b: number[]): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// face-api — detect + 128-d descriptor
+// face-api
 // ─────────────────────────────────────────────────────────────────────
 
 let faceLoaded = false;
 let faceLoading: Promise<void> | null = null;
 const FACE_MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model";
 
-export async function loadFaceApi(onProgress?: (msg: string) => void): Promise<void> {
-  if (faceLoaded) return;
-  if (faceLoading) return faceLoading;
+export async function loadFaceApi(log: AiLogger = consoleLogger): Promise<void> {
+  if (faceLoaded) {
+    log("face-api already loaded");
+    return;
+  }
+  if (faceLoading) {
+    log("face-api load in progress, waiting…");
+    return faceLoading;
+  }
   faceLoading = (async () => {
-    onProgress?.("Loading face detection model (~6 MB)…");
-    const faceapi = await import("@vladmandic/face-api");
-    await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL);
-    await faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL);
-    await faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL);
-    faceLoaded = true;
-    onProgress?.("Face model ready.");
+    try {
+      log("Importing @vladmandic/face-api…");
+      const faceapi = await import("@vladmandic/face-api");
+      log(`Downloading face models from jsdelivr CDN…`);
+      await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL);
+      log("✓ Tiny face detector loaded");
+      await faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL);
+      log("✓ Face landmarks loaded");
+      await faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL);
+      log("✓ Face recognition loaded");
+      faceLoaded = true;
+      log("face-api ready");
+    } catch (err) {
+      faceLoading = null;
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`face-api load FAILED: ${msg}`, "error");
+      throw err;
+    }
   })();
   return faceLoading;
 }
@@ -127,8 +160,6 @@ export async function detectFaces(bitmap: ImageBitmap): Promise<FaceRecord[]> {
   await loadFaceApi();
   const faceapi = await import("@vladmandic/face-api");
 
-  // face-api wants an HTMLCanvasElement (or HTMLImageElement) — OffscreenCanvas
-  // is not always accepted across versions. Render to a real <canvas>.
   const c = document.createElement("canvas");
   c.width = bitmap.width;
   c.height = bitmap.height;
@@ -151,7 +182,7 @@ export async function detectFaces(bitmap: ImageBitmap): Promise<FaceRecord[]> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Clustering — union-find with L2 distance threshold
+// Face clustering
 // ─────────────────────────────────────────────────────────────────────
 
 interface FaceRef {
@@ -170,6 +201,7 @@ const FACE_EPS = 0.55;
 
 export function clusterFaces(faces: FaceRef[]): RawCluster[] {
   const n = faces.length;
+  if (n === 0) return [];
   const parent = new Int32Array(n);
   for (let i = 0; i < n; i++) parent[i] = i;
   const find = (x: number): number => {
@@ -209,7 +241,6 @@ export function clusterFaces(faces: FaceRef[]): RawCluster[] {
       members: idxs.map((i) => ({ itemId: faces[i]!.itemId, faceIdx: faces[i]!.faceIdx })),
     });
   }
-  // largest clusters first
   clusters.sort((a, b) => b.members.length - a.members.length);
   return clusters;
 }

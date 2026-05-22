@@ -1,26 +1,29 @@
 // Suggestion engine — generates actionable cleanup recommendations from
-// real scan data. Every suggestion can be applied: clicking "Stage" adds
-// the matching items to useLibraryStore's stagedForTrash set.
+// real scan data. Now uses percentile-based thresholds so that a "clean"
+// camera folder still surfaces its weakest 5% as candidates — you can
+// always Dismiss what you don't want.
 
 import type { BrowserDuplicateGroup, BrowserMediaItem } from "../browser/types";
-import { isBlurry, isDark, isOverexposed } from "../browser/quality";
+import { quantileItems } from "./diagnostics";
 
-export type SuggestionIcon = "save" | "burst" | "shot" | "blur" | "wa" | "video" | "doc" | "tiny";
+export type SuggestionIcon = "save" | "burst" | "shot" | "blur" | "wa" | "video" | "doc" | "tiny" | "dark";
 
 export interface RealSuggestion {
   id: string;
   icon: SuggestionIcon;
   title: string;
   body: string;
-  /** ids of items this suggestion would stage for trash */
   itemIds: string[];
-  /** total bytes that would be reclaimed */
   bytes: number;
-  /** lower = higher priority */
   priority: number;
 }
 
-const MIN_THRESHOLD = 1; // show even single-item findings
+const fmtBytes = (b: number): string => {
+  if (b < 1024) return b + " B";
+  if (b < 1024 ** 2) return (b / 1024).toFixed(1) + " KB";
+  if (b < 1024 ** 3) return (b / 1024 ** 2).toFixed(1) + " MB";
+  return (b / 1024 ** 3).toFixed(1) + " GB";
+};
 
 export function buildSuggestions(
   items: BrowserMediaItem[],
@@ -30,7 +33,7 @@ export function buildSuggestions(
   const byId = new Map(items.map((it) => [it.id, it]));
   const sugs: RealSuggestion[] = [];
 
-  // 1. Exact duplicates — keep best, trash rest
+  // 1. Exact duplicates — keep best of each group
   if (exact.length > 0) {
     const trashIds: string[] = [];
     let bytes = 0;
@@ -42,12 +45,12 @@ export function buildSuggestions(
         if (it) bytes += it.sizeBytes;
       }
     }
-    if (trashIds.length >= MIN_THRESHOLD) {
+    if (trashIds.length > 0) {
       sugs.push({
         id: "dups-exact",
         icon: "save",
         title: `Remove ${trashIds.length} exact-duplicate cop${trashIds.length === 1 ? "y" : "ies"}`,
-        body: `${exact.length} duplicate group${exact.length === 1 ? "" : "s"} · recover ${fmtBytes(bytes)}`,
+        body: `${exact.length} duplicate group${exact.length === 1 ? "" : "s"} found by SHA-256 · recover ${fmtBytes(bytes)}`,
         itemIds: trashIds,
         bytes,
         priority: 1,
@@ -67,12 +70,12 @@ export function buildSuggestions(
         if (it) bytes += it.sizeBytes;
       }
     }
-    if (trashIds.length >= MIN_THRESHOLD) {
+    if (trashIds.length > 0) {
       sugs.push({
         id: "dups-near",
         icon: "burst",
-        title: `Keep the best frame of ${near.length} near-duplicate cluster${near.length === 1 ? "" : "s"}`,
-        body: `${trashIds.length} extra copies · recover ${fmtBytes(bytes)}`,
+        title: `Keep best frame of ${near.length} near-duplicate cluster${near.length === 1 ? "" : "s"}`,
+        body: `${trashIds.length} extra copies found by perceptual hash · recover ${fmtBytes(bytes)}`,
         itemIds: trashIds,
         bytes,
         priority: 2,
@@ -80,45 +83,45 @@ export function buildSuggestions(
     }
   }
 
-  // 3. Blurry photos
-  const blurry = items.filter((i) => i.qualityScore !== null && isBlurry(i.qualityScore) && i.kind === "IMAGE");
-  if (blurry.length >= MIN_THRESHOLD) {
+  // 3. Worst-quality 5% (always surfaced even if absolute scores look OK)
+  const blurry = quantileItems(items.filter((i) => i.kind === "IMAGE"), (i) => i.qualityScore, 0.05, "low");
+  if (blurry.length > 0) {
     const bytes = blurry.reduce((a, b) => a + b.sizeBytes, 0);
     sugs.push({
       id: "blurry",
       icon: "blur",
-      title: `Review ${blurry.length} blurry photo${blurry.length === 1 ? "" : "s"}`,
-      body: `Detected by Laplacian variance · ${fmtBytes(bytes)} total`,
+      title: `Review ${blurry.length} least-sharp photo${blurry.length === 1 ? "" : "s"}`,
+      body: `Bottom 5% by Laplacian variance · ${fmtBytes(bytes)} · likely blurry or out of focus`,
       itemIds: blurry.map((b) => b.id),
       bytes,
       priority: 3,
     });
   }
 
-  // 4. Dark / underexposed photos (likely pocket shots)
-  const dark = items.filter((i) => i.brightness !== null && isDark(i.brightness) && i.kind === "IMAGE");
-  if (dark.length >= MIN_THRESHOLD) {
+  // 4. Darkest 5% (underexposed candidates)
+  const dark = quantileItems(items.filter((i) => i.kind === "IMAGE"), (i) => i.brightness, 0.05, "low");
+  if (dark.length > 0) {
     const bytes = dark.reduce((a, b) => a + b.sizeBytes, 0);
     sugs.push({
       id: "dark",
-      icon: "blur",
-      title: `Review ${dark.length} very dark photo${dark.length === 1 ? "" : "s"}`,
-      body: `Often accidental pocket shots · ${fmtBytes(bytes)} total`,
+      icon: "dark",
+      title: `Review ${dark.length} darkest photo${dark.length === 1 ? "" : "s"}`,
+      body: `Bottom 5% by mean luma · ${fmtBytes(bytes)} · likely underexposed or accidental pocket shots`,
       itemIds: dark.map((b) => b.id),
       bytes,
       priority: 4,
     });
   }
 
-  // 5. Overexposed
-  const blown = items.filter((i) => i.brightness !== null && isOverexposed(i.brightness) && i.kind === "IMAGE");
-  if (blown.length >= MIN_THRESHOLD) {
+  // 5. Brightest 2% (overexposed candidates)
+  const blown = quantileItems(items.filter((i) => i.kind === "IMAGE"), (i) => i.brightness, 0.02, "high");
+  if (blown.length > 0) {
     const bytes = blown.reduce((a, b) => a + b.sizeBytes, 0);
     sugs.push({
       id: "blown",
-      icon: "blur",
+      icon: "dark",
       title: `Review ${blown.length} overexposed photo${blown.length === 1 ? "" : "s"}`,
-      body: `Mostly white frames · ${fmtBytes(bytes)} total`,
+      body: `Top 2% brightness · ${fmtBytes(bytes)} · mostly white frames`,
       itemIds: blown.map((b) => b.id),
       bytes,
       priority: 5,
@@ -127,13 +130,13 @@ export function buildSuggestions(
 
   // 6. Screenshots
   const screenshots = items.filter((i) => i.category === "SCREENSHOT");
-  if (screenshots.length >= 3) {
+  if (screenshots.length > 0) {
     const bytes = screenshots.reduce((a, b) => a + b.sizeBytes, 0);
     sugs.push({
       id: "screenshots",
       icon: "shot",
-      title: `${screenshots.length} screenshot${screenshots.length === 1 ? "" : "s"} found`,
-      body: `Usually short-lived references · ${fmtBytes(bytes)} total`,
+      title: `${screenshots.length} screenshot${screenshots.length === 1 ? "" : "s"} detected`,
+      body: `Matched filename pattern (Screenshot_*, /Screenshots/) · ${fmtBytes(bytes)}`,
       itemIds: screenshots.map((b) => b.id),
       bytes,
       priority: 6,
@@ -142,13 +145,13 @@ export function buildSuggestions(
 
   // 7. WhatsApp / messenger files
   const messenger = items.filter((i) => i.category === "WHATSAPP_FORWARD");
-  if (messenger.length >= 3) {
+  if (messenger.length > 0) {
     const bytes = messenger.reduce((a, b) => a + b.sizeBytes, 0);
     sugs.push({
       id: "messenger",
       icon: "wa",
       title: `${messenger.length} WhatsApp/messenger file${messenger.length === 1 ? "" : "s"}`,
-      body: `Compressed forwards and chat thumbnails · ${fmtBytes(bytes)} total`,
+      body: `Matched IMG-YYYYMMDD-WA* or /WhatsApp/Media/ path · ${fmtBytes(bytes)}`,
       itemIds: messenger.map((b) => b.id),
       bytes,
       priority: 7,
@@ -159,30 +162,30 @@ export function buildSuggestions(
   const transactional = items.filter((i) =>
     ["DOCUMENT", "RECEIPT", "TRANSACTIONAL"].includes(i.category),
   );
-  if (transactional.length >= 3) {
+  if (transactional.length > 0) {
     const bytes = transactional.reduce((a, b) => a + b.sizeBytes, 0);
     sugs.push({
       id: "transactional",
       icon: "doc",
       title: `${transactional.length} ephemeral document${transactional.length === 1 ? "" : "s"}`,
-      body: `Receipts, QR codes, parking spots, IDs · ${fmtBytes(bytes)} total`,
+      body: `Receipts, QR codes, parking spots, IDs · ${fmtBytes(bytes)}`,
       itemIds: transactional.map((b) => b.id),
       bytes,
       priority: 8,
     });
   }
 
-  // 9. Tiny / low-resolution images (likely shared/compressed)
+  // 9. Tiny / low-resolution images
   const tiny = items.filter(
     (i) => i.kind === "IMAGE" && i.width != null && i.width <= 800 && i.height != null && i.height <= 800,
   );
-  if (tiny.length >= 5) {
+  if (tiny.length >= 3) {
     const bytes = tiny.reduce((a, b) => a + b.sizeBytes, 0);
     sugs.push({
       id: "tiny",
       icon: "tiny",
       title: `${tiny.length} low-resolution image${tiny.length === 1 ? "" : "s"}`,
-      body: `≤800px on the long edge — typically shared/compressed · ${fmtBytes(bytes)}`,
+      body: `≤800px on the long edge · ${fmtBytes(bytes)} · typically shared/compressed copies`,
       itemIds: tiny.map((b) => b.id),
       bytes,
       priority: 9,
@@ -197,7 +200,7 @@ export function buildSuggestions(
       id: "bigvideo",
       icon: "video",
       title: `${bigVideos.length} large video${bigVideos.length === 1 ? "" : "s"} (>500 MB each)`,
-      body: `Often safe to archive · ${fmtBytes(bytes)} total`,
+      body: `Often safe to archive or compress · ${fmtBytes(bytes)} total`,
       itemIds: bigVideos.map((b) => b.id),
       bytes,
       priority: 10,
@@ -207,15 +210,8 @@ export function buildSuggestions(
   return sugs.sort((a, b) => a.priority - b.priority);
 }
 
-function fmtBytes(b: number): string {
-  if (b < 1024) return b + " B";
-  if (b < 1024 ** 2) return (b / 1024).toFixed(1) + " KB";
-  if (b < 1024 ** 3) return (b / 1024 ** 2).toFixed(1) + " MB";
-  return (b / 1024 ** 3).toFixed(1) + " GB";
-}
-
 // ─────────────────────────────────────────────────────────────────────
-// Cleanup script generator
+// Cleanup script generator (unchanged — used for browsers without FS access)
 // ─────────────────────────────────────────────────────────────────────
 
 export interface CleanupScriptOptions {
@@ -233,16 +229,6 @@ export function generateCleanupScript(opts: CleanupScriptOptions): string {
   const lines = [
     "#!/usr/bin/env bash",
     "# Lumen cleanup script — generated " + new Date().toString(),
-    "#",
-    "# This moves the files Lumen flagged into a dated trash folder.",
-    "# It does NOT delete them. To permanently remove later, just:",
-    "#   rm -rf " + target,
-    "#",
-    "# Review the list below before running. Anything you remove from",
-    "# this script will not be moved.",
-    "#",
-    `# Files staged: ${paths.length}`,
-    libraryRoot ? `# Library root: ${libraryRoot}` : "",
     "set -euo pipefail",
     "",
     `TRASH=${escape(target)}`,
@@ -251,8 +237,6 @@ export function generateCleanupScript(opts: CleanupScriptOptions): string {
     "missing=0",
     "",
     ...paths.map((p) => {
-      // Preserve relative-path structure inside the trash dir.
-      // If the path is relative (no leading /), prefix with library root.
       const isAbs = p.startsWith("/");
       const abs = isAbs ? p : libraryRoot ? `${libraryRoot}/${p}` : p;
       const subPath = isAbs ? p.replace(/^\//, "") : p;
@@ -271,7 +255,7 @@ export function generateCleanupScript(opts: CleanupScriptOptions): string {
     "",
     `echo "moved $moved files into $TRASH (missing: $missing)"`,
     "",
-  ].filter(Boolean);
+  ];
   return lines.join("\n");
 }
 

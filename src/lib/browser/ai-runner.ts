@@ -1,14 +1,7 @@
-// Orchestrates AI analysis across all scanned items. Lane-parallel where
-// safe (CLIP is single-instance; we serialize). Reports progress.
+// Orchestrates AI analysis across all scanned items.
 
-import { clipEncodeImage, detectFaces, loadClip, loadFaceApi } from "./ai";
+import { clipEncodeImage, detectFaces, loadClip, loadFaceApi, type AiLogger } from "./ai";
 import type { BrowserMediaItem } from "./types";
-
-interface InputItem {
-  id: string;
-  file?: File; // present when picked via showDirectoryPicker — we have the handle
-  thumbDataUrl: string | null;
-}
 
 export interface AiPatch {
   id: string;
@@ -20,31 +13,41 @@ export interface AiOptions {
   items: BrowserMediaItem[];
   getFile: (id: string) => Promise<File | null>;
   doFaces?: boolean;
-  onProgress?: (s: { scanned: number; total: number; phase: string; current: string | null }) => void;
+  onProgress?: (s: { scanned: number; total: number; phase: string; current: string | null; errors: number }) => void;
+  onLog?: AiLogger;
   signal?: AbortSignal;
 }
 
 export async function runAiAnalysis(opts: AiOptions): Promise<AiPatch[]> {
+  const log: AiLogger = opts.onLog ?? ((msg) => console.log("[lumen-ai]", msg));
   const targets = opts.items.filter((i) => i.kind === "IMAGE");
   const total = targets.length;
   const patches: AiPatch[] = [];
   const doFaces = opts.doFaces ?? true;
+  let errors = 0;
 
-  opts.onProgress?.({ scanned: 0, total, phase: "loading-clip", current: null });
-  await loadClip((msg) => opts.onProgress?.({ scanned: 0, total, phase: msg, current: null }));
+  log(`Starting AI analysis on ${total} image(s)`);
+  opts.onProgress?.({ scanned: 0, total, phase: "loading CLIP model", current: null, errors });
+  await loadClip(log);
   if (doFaces) {
-    opts.onProgress?.({ scanned: 0, total, phase: "loading-face", current: null });
-    await loadFaceApi((msg) => opts.onProgress?.({ scanned: 0, total, phase: msg, current: null }));
+    opts.onProgress?.({ scanned: 0, total, phase: "loading face model", current: null, errors });
+    await loadFaceApi(log);
   }
 
+  const startedAt = performance.now();
   for (let i = 0; i < targets.length; i++) {
-    if (opts.signal?.aborted) break;
+    if (opts.signal?.aborted) {
+      log(`Cancelled at ${i}/${total}`);
+      break;
+    }
     const item = targets[i]!;
-    opts.onProgress?.({ scanned: i, total, phase: "embedding", current: item.relativePath });
+    opts.onProgress?.({ scanned: i, total, phase: "encoding", current: item.relativePath, errors });
 
     const file = await opts.getFile(item.id);
     if (!file) {
+      log(`Skipping ${item.relativePath}: no file handle (was the folder picked read-only?)`, "warn");
       patches.push({ id: item.id, clipEmbedding: null, faces: [] });
+      errors++;
       continue;
     }
 
@@ -53,20 +56,32 @@ export async function runAiAnalysis(opts: AiOptions): Promise<AiPatch[]> {
 
     let bitmap: ImageBitmap | null = null;
     try {
-      bitmap = await createImageBitmap(file).catch(() => null);
+      bitmap = await createImageBitmap(file).catch((e) => {
+        log(`createImageBitmap failed for ${item.relativePath}: ${e}`, "warn");
+        return null;
+      });
       if (bitmap) {
         try {
           clipEmbedding = await clipEncodeImage(bitmap);
-        } catch {
+        } catch (err) {
+          log(`CLIP encode failed for ${item.relativePath}: ${err}`, "warn");
           clipEmbedding = null;
+          errors++;
         }
         if (doFaces) {
           try {
             faces = await detectFaces(bitmap);
-          } catch {
+            if (faces.length > 0 && i % 50 === 0) {
+              log(`${item.relativePath}: detected ${faces.length} face(s)`);
+            }
+          } catch (err) {
+            log(`Face detection failed for ${item.relativePath}: ${err}`, "warn");
             faces = [];
+            errors++;
           }
         }
+      } else {
+        errors++;
       }
     } finally {
       bitmap?.close?.();
@@ -74,11 +89,19 @@ export async function runAiAnalysis(opts: AiOptions): Promise<AiPatch[]> {
 
     patches.push({ id: item.id, clipEmbedding, faces });
 
-    // Yield to the event loop so the UI stays responsive.
     if ((i & 1) === 0) await microyield();
+    if (i % 50 === 0 && i > 0) {
+      const rate = (i / ((performance.now() - startedAt) / 1000)).toFixed(2);
+      log(`Progress: ${i}/${total} (${rate} img/s · ${errors} errors)`);
+    }
   }
 
-  opts.onProgress?.({ scanned: total, total, phase: "done", current: null });
+  const elapsed = ((performance.now() - startedAt) / 1000).toFixed(1);
+  const embedded = patches.filter((p) => p.clipEmbedding !== null).length;
+  const totalFaces = patches.reduce((a, p) => a + (p.faces?.length ?? 0), 0);
+  log(`Done in ${elapsed}s · ${embedded} embeddings · ${totalFaces} faces · ${errors} errors`);
+
+  opts.onProgress?.({ scanned: total, total, phase: "done", current: null, errors });
   return patches;
 }
 
