@@ -6,7 +6,7 @@ import { buildSuggestions, type RealSuggestion, type SuggestionIcon } from "@/li
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
   IconBroom, IconBurst, IconBlur, IconShot, IconWA, IconVideo,
-  IconFile, IconCheck, IconRefresh, IconArrowR, IconSparkle, IconRestore, IconFlash,
+  IconFile, IconCheck, IconRefresh, IconArrowR, IconSparkle, IconRestore, IconFlash, IconX,
 } from "./icons";
 import { DiagnosticsPanel } from "./diagnostics-panel";
 import type { FocusContext } from "./types";
@@ -21,6 +21,7 @@ const ICON_MAP: Record<SuggestionIcon, ComponentType<{ size?: number }>> = {
   video: IconVideo,
   doc: IconFile,
   tiny: IconFile,
+  blank: IconX,
 };
 
 interface Props {

@@ -62,6 +62,7 @@ async function processInput(
   let height: number | null = null;
   let qualityScore: number | null = null;
   let brightness: number | null = null;
+  let colorVariance: number | null = null;
 
   if (allowVisual) {
     const [shaResult, bitmap] = await Promise.all([
@@ -77,6 +78,7 @@ async function processInput(
       if (quality) {
         qualityScore = quality.blurScore;
         brightness = quality.brightness;
+        colorVariance = quality.colorVariance;
       }
       const t = await makeThumbFromBitmap(bitmap).catch(() => null);
       if (t) thumbDataUrl = t.dataUrl;
@@ -115,6 +117,7 @@ async function processInput(
     categoryConfidence: cls.confidence,
     qualityScore,
     brightness,
+    colorVariance,
     clipEmbedding: null,
     faces: null,
   };

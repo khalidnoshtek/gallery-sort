@@ -1,50 +1,65 @@
 // Quality scoring — runs on the decoded thumbnail (not the full-resolution
 // image) so it's fast. Pure math, no ML.
 //
-// blurScore: variance of Laplacian — the classic blur metric.
-//   1. convert to grayscale
-//   2. apply 3×3 Laplacian kernel
-//   3. variance of the result
-// Higher variance = more high-frequency detail = sharper image.
-//
-// brightness: mean luma 0..1. Used to flag dark / overexposed pocket shots.
+// blurScore: variance of Laplacian on grayscale. Higher = sharper.
+// brightness: mean luma 0..1. Used for dark / overexposed detection.
+// colorVariance: average per-channel variance of RGB. Low values =
+//   monochrome / blank / accidental black-frame photos (a wall, the inside
+//   of a pocket, a finger over the lens). High = real-world content.
 
 export interface QualityScores {
-  blurScore: number;   // variance of Laplacian (typical range 0..1000+)
-  brightness: number;  // mean luma 0..1
+  blurScore: number;
+  brightness: number;
+  colorVariance: number;
 }
 
 export function computeQualityFromBitmap(bitmap: ImageBitmap): QualityScores | null {
-  // Downsample to a fixed size — variance scales with image dimensions, so
-  // using a constant size makes thresholds portable across photo sizes.
   const W = 128;
   const H = 128;
+  const N = W * H;
   const canvas = new OffscreenCanvas(W, H);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return null;
   ctx.drawImage(bitmap, 0, 0, W, H);
   const data = ctx.getImageData(0, 0, W, H).data;
 
-  // Pre-compute grayscale (Rec. 709 luma).
-  const gray = new Float32Array(W * H);
-  let sumLuma = 0;
-  for (let i = 0; i < W * H; i++) {
+  // Single pass: grayscale, channel sums, luma sum.
+  const gray = new Float32Array(N);
+  let sumR = 0, sumG = 0, sumB = 0, sumLuma = 0;
+  for (let i = 0; i < N; i++) {
     const r = data[i * 4]!;
     const g = data[i * 4 + 1]!;
     const b = data[i * 4 + 2]!;
+    sumR += r;
+    sumG += g;
+    sumB += b;
     const y = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
     gray[i] = y;
     sumLuma += y;
   }
-  const brightness = sumLuma / (W * H);
+  const brightness = sumLuma / N;
+  const meanR = sumR / N;
+  const meanG = sumG / N;
+  const meanB = sumB / N;
 
-  // 3x3 Laplacian kernel:  0  1  0
-  //                        1 -4  1
-  //                        0  1  0
-  // Skip the 1-pixel border. Compute mean + variance of the response.
-  let sum = 0;
-  let sumSq = 0;
-  let count = 0;
+  // Second pass: color variance per channel, plus the Laplacian.
+  let varR = 0, varG = 0, varB = 0;
+  for (let i = 0; i < N; i++) {
+    const r = data[i * 4]!;
+    const g = data[i * 4 + 1]!;
+    const b = data[i * 4 + 2]!;
+    varR += (r - meanR) * (r - meanR);
+    varG += (g - meanG) * (g - meanG);
+    varB += (b - meanB) * (b - meanB);
+  }
+  // Average per-channel variance — typical real photo: 1000–6000+,
+  // mostly-blank photo: 50–300, near-perfectly uniform: < 50.
+  const colorVariance = (varR + varG + varB) / (3 * N);
+
+  // Laplacian variance (blur score). Skip a 1-pixel border.
+  let sumLap = 0;
+  let sumSqLap = 0;
+  let countLap = 0;
   for (let y = 1; y < H - 1; y++) {
     for (let x = 1; x < W - 1; x++) {
       const i = y * W + x;
@@ -54,17 +69,15 @@ export function computeQualityFromBitmap(bitmap: ImageBitmap): QualityScores | n
         gray[i - 1]! +
         gray[i + 1]! -
         4 * gray[i]!;
-      sum += lap;
-      sumSq += lap * lap;
-      count++;
+      sumLap += lap;
+      sumSqLap += lap * lap;
+      countLap++;
     }
   }
-  const mean = sum / count;
-  // Multiply by 1e6 so the score lands in a human-readable 0..2000+ range.
-  // (Luma values are 0..1, so the raw variance is tiny.)
-  const variance = (sumSq / count - mean * mean) * 1_000_000;
+  const meanLap = sumLap / countLap;
+  const blurScore = (sumSqLap / countLap - meanLap * meanLap) * 1_000_000;
 
-  return { blurScore: variance, brightness };
+  return { blurScore, brightness, colorVariance };
 }
 
 export function isBlurry(blurScore: number): boolean {
@@ -77,4 +90,9 @@ export function isDark(brightness: number): boolean {
 
 export function isOverexposed(brightness: number): boolean {
   return brightness > 0.92;
+}
+
+/** A near-blank / near-monochrome photo. Walls, lens-covered, accidental. */
+export function isBlank(colorVariance: number): boolean {
+  return colorVariance < 200;
 }

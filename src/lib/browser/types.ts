@@ -30,6 +30,9 @@ export interface BrowserMediaItem {
 
   qualityScore: number | null;
   brightness: number | null;
+  /** Spread of RGB pixel values across the image. Low = monochrome / blank /
+   * accidental black-frame photo. High = colorful real-world scene. */
+  colorVariance: number | null;
 
   // AI — populated by the optional analysis phase.
   clipEmbedding: number[] | null;   // 512-d CLIP image embedding (normalized)

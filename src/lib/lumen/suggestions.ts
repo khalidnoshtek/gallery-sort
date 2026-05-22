@@ -6,7 +6,7 @@
 import type { BrowserDuplicateGroup, BrowserMediaItem } from "../browser/types";
 import { quantileItems } from "./diagnostics";
 
-export type SuggestionIcon = "save" | "burst" | "shot" | "blur" | "wa" | "video" | "doc" | "tiny" | "dark";
+export type SuggestionIcon = "save" | "burst" | "shot" | "blur" | "wa" | "video" | "doc" | "tiny" | "dark" | "blank";
 
 export interface RealSuggestion {
   id: string;
@@ -110,6 +110,28 @@ export function buildSuggestions(
       itemIds: dark.map((b) => b.id),
       bytes,
       priority: 4,
+    });
+  }
+
+  // 4b. Likely blank / accidental / lens-covered photos.
+  // Bottom 5% by RGB color variance — covers walls, dark accidents, finger-
+  // over-camera shots, uniform-color screen grabs. These are usually pure junk.
+  const blankCandidates = quantileItems(
+    items.filter((i) => i.kind === "IMAGE" && i.colorVariance !== null),
+    (i) => i.colorVariance,
+    0.05,
+    "low",
+  );
+  if (blankCandidates.length > 0) {
+    const bytes = blankCandidates.reduce((a, b) => a + b.sizeBytes, 0);
+    sugs.push({
+      id: "blank",
+      icon: "blank",
+      title: `Review ${blankCandidates.length} likely blank or accidental photo${blankCandidates.length === 1 ? "" : "s"}`,
+      body: `Lowest 5% RGB variance · ${fmtBytes(bytes)} · walls, lens-covered, near-monochrome — usually safe to delete`,
+      itemIds: blankCandidates.map((b) => b.id),
+      bytes,
+      priority: 4.5,
     });
   }
 

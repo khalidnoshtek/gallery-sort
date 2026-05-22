@@ -33,7 +33,9 @@ function useImageUrlCache() {
     if (inflight) return inflight;
     const handle = fsHandles.get(item.id);
     if (!handle) {
-      return item.thumbDataUrl ?? null;
+      // No write-access handle — for images we can still show the embedded
+      // thumbnail data URL; videos genuinely have no preview source available.
+      return item.kind === "VIDEO" ? null : (item.thumbDataUrl ?? null);
     }
     const p = (async () => {
       try {
@@ -43,7 +45,7 @@ function useImageUrlCache() {
         cacheRef.current.set(item.id, url);
         return url;
       } catch {
-        return item.thumbDataUrl ?? null;
+        return item.kind === "VIDEO" ? null : (item.thumbDataUrl ?? null);
       } finally {
         inFlightRef.current.delete(item.id);
       }
@@ -145,7 +147,8 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
     if (index < items.length - 1) goNext();
   }, [item, index, items.length, unstageItems, goNext]);
 
-  // Keyboard
+  // Keyboard. Note: Space is intentionally NOT bound so it stays available
+  // for the native video play/pause behavior.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -157,13 +160,15 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         goPrev();
-      } else if (e.key === " ") {
-        e.preventDefault();
-        goNext();
       } else if (e.key.toLowerCase() === "k") {
+        // Only intercept if not focused inside a control (e.g. video element)
+        const tag = (e.target as HTMLElement | null)?.tagName;
+        if (tag === "VIDEO" || tag === "INPUT") return;
         e.preventDefault();
         keepAndAdvance();
       } else if (e.key.toLowerCase() === "t" || e.key.toLowerCase() === "d") {
+        const tag = (e.target as HTMLElement | null)?.tagName;
+        if (tag === "VIDEO" || tag === "INPUT") return;
         e.preventDefault();
         stageAndAdvance();
       }
@@ -289,24 +294,42 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
           </button>
         )}
         {url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={url}
-            alt={item.filename}
-            draggable={false}
-            style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
-              objectFit: "contain",
-              userSelect: "none",
-              borderRadius: 4,
-              boxShadow: "0 30px 80px rgba(0,0,0,0.5)",
-              aspectRatio: aspect ?? undefined,
-              // No opacity transition — browsers keep the previous decoded
-              // image visible during src change. Transitioning opacity is
-              // what caused the blink.
-            }}
-          />
+          item.kind === "VIDEO" ? (
+            <video
+              // Re-mount the element when navigating between videos so the
+              // source actually swaps and the previous video stops.
+              key={item.id}
+              src={url}
+              controls
+              autoPlay
+              loop
+              playsInline
+              style={{
+                maxWidth: "100%",
+                maxHeight: "100%",
+                userSelect: "none",
+                borderRadius: 4,
+                boxShadow: "0 30px 80px rgba(0,0,0,0.5)",
+                background: "#000",
+              }}
+            />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={url}
+              alt={item.filename}
+              draggable={false}
+              style={{
+                maxWidth: "100%",
+                maxHeight: "100%",
+                objectFit: "contain",
+                userSelect: "none",
+                borderRadius: 4,
+                boxShadow: "0 30px 80px rgba(0,0,0,0.5)",
+                aspectRatio: aspect ?? undefined,
+              }}
+            />
+          )
         ) : pending ? (
           <div style={{ color: "var(--muted)", fontSize: 13 }}>Loading…</div>
         ) : (
@@ -394,7 +417,7 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
           pointerEvents: "none",
         }}
       >
-        ← →  navigate  ·  K  keep  ·  T  trash  ·  ESC  close
+        ← →  navigate  ·  K  keep  ·  T  trash  ·  ESC  close{item.kind === "VIDEO" ? "  ·  Space play/pause" : ""}
       </div>
     </div>
   );
