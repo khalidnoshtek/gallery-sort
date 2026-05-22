@@ -5,7 +5,7 @@ import { useLibraryStore } from "@/state/library-store";
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
   IconLibrary, IconClock, IconSearch, IconBroom, IconDup, IconSparkle, IconFace,
-  IconTrash, IconFolder, IconPlus, IconRestore, LumenMark,
+  IconTrash, IconFolder, IconPlus, IconRestore, IconX, LumenMark,
 } from "./icons";
 import type { View } from "./types";
 
@@ -48,11 +48,14 @@ interface Props {
   reclaimable: number;
   suggestionCount: number;
   stagedCount: number;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export function Sidebar({
   view, setView, onScan, onRunAi, realLibrary, onClearLibrary,
   dupGroupCount, reclaimable, suggestionCount, stagedCount,
+  isOpen = false, onClose,
 }: Props) {
   const items = useLibraryStore((s) => s.items);
   const hasLib = realLibrary !== null;
@@ -60,7 +63,7 @@ export function Sidebar({
   const peopleCount = items.reduce((a, i) => a + (i.faces?.length ?? 0), 0);
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" data-open={isOpen ? "1" : "0"}>
       <div className="sb-header">
         <div className="sb-traffic">
           <span className="tl tl-r" />
@@ -69,7 +72,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="sb-brand">
+      <div className="sb-brand" style={{ position: "relative" }}>
         <div className="sb-mark"><LumenMark size={22} /></div>
         <div>
           <div className="sb-name">Lumen</div>
@@ -77,6 +80,28 @@ export function Sidebar({
             {hasLib ? `Local · ${fmtCount(realLibrary.count)} items` : "Local · no library yet"}
           </div>
         </div>
+        {onClose && (
+          <button
+            className="mobile-only"
+            onClick={onClose}
+            aria-label="Close menu"
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 12,
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: "rgba(255,255,255,0.04)",
+              border: "0.5px solid var(--border-soft)",
+              color: "var(--secondary)",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconX size={14} />
+          </button>
+        )}
       </div>
 
       <div className="sb-section">

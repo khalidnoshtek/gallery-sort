@@ -928,6 +928,288 @@ a { color: var(--text); text-decoration: none; cursor: default; }
 .trash-empty h2 { font-family: var(--display); font-weight: 500; margin: 0; font-size: 24px; color: var(--text); letter-spacing: -0.025em; }
 .trash-empty p { max-width: 380px; text-align: center; font-size: 13.5px; line-height: 1.55; letter-spacing: -0.005em; }
 
+/* ─────────────────────── Mobile / responsive ─────────────────────── */
+
+/* Above ~900px the fixed 1380×880 design + win-fit scaling looks great.
+   Below that, we drop the scale entirely and switch to a native responsive
+   layout: sidebar becomes a slide-out drawer, grids reflow, buttons grow
+   touch-friendly. */
+
+.hamburger { display: none; }
+.mobile-only { display: none; }
+.sidebar { z-index: 10; }
+.sb-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  /* Stop the scale-to-fit; let the design flow at the natural viewport size. */
+  html, body { font-size: 14px; }
+
+  .stage {
+    position: static;
+    height: auto;
+    min-height: 100vh;
+    width: 100vw;
+    overflow: visible;
+  }
+
+  .win-fit {
+    position: static;
+    width: 100%;
+    height: 100%;
+    transform: none !important;
+  }
+
+  .win {
+    width: 100%;
+    min-height: 100vh;
+    grid-template-columns: 1fr;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .win::before { display: none; }
+
+  /* Sidebar = slide-out drawer */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(82vw, 320px);
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.22s cubic-bezier(.2,.7,.3,1);
+    box-shadow: 8px 0 40px rgba(0,0,0,0.55);
+    overflow-y: auto;
+  }
+  .sidebar[data-open="1"] { transform: translateX(0); }
+  .sb-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(4px);
+    z-index: 40;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .sb-backdrop[data-open="1"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .sb-header { display: none; } /* hide macOS traffic lights on mobile */
+  .sb-brand { padding-top: 24px; }
+  .side-item { padding: 12px 14px; font-size: 14px; min-height: 44px; }
+  .si-icon { width: 22px; }
+
+  /* Topbar */
+  .topbar {
+    grid-template-columns: auto 1fr auto;
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .tb-left { gap: 8px; flex-direction: column; align-items: flex-start; }
+  .tb-title { font-size: 17px; }
+  .tb-sub { font-size: 11px; }
+  .tb-search {
+    display: none; /* search input hidden on small screens to make room; reachable via /search */
+  }
+  .tb-tools { gap: 4px; }
+  .tb-btn { padding: 10px; }
+  .hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    background: rgba(255,255,255,0.04);
+    border: 0.5px solid var(--border-soft);
+    border-radius: 8px;
+    color: var(--text);
+  }
+  .mobile-only { display: inline-flex; }
+
+  /* Selection bar */
+  .sel-bar { padding: 0 14px; }
+  .sel-actions { gap: 4px; }
+  .sel-act { padding: 8px 10px; font-size: 12px; }
+
+  /* Grids: fewer columns, larger thumbs */
+  .lib-grid.uniform { grid-template-columns: repeat(3, 1fr); }
+  .lib-grid.masonry { column-width: 110px; column-gap: 4px; }
+  .lib-grid.masonry .card { margin-bottom: 4px; }
+  .lib-grid { gap: 4px; }
+
+  /* Views */
+  .view {
+    padding: 20px 14px 80px;
+  }
+  .lib-scroll { padding: 14px; }
+
+  /* Cleanup hero stacks */
+  .cleanup-hero {
+    grid-template-columns: 1fr;
+    gap: 32px;
+    padding: 0 0 36px;
+    margin-bottom: 28px;
+  }
+  .ch-num { font-size: 72px; }
+  .ch-unit { font-size: 28px; }
+  .ch-headline { gap: 8px; }
+  .ch-disk { width: 100%; max-width: 320px; margin: 0 auto; }
+
+  /* Storage bar legend */
+  .sbar-legend { grid-template-columns: 1fr; gap: 8px; }
+
+  /* Cleanup buckets: single column */
+  .cleanup-buckets { grid-template-columns: 1fr; }
+  .bucket { padding: 18px 16px; }
+
+  /* Cleanup safe rows: single column */
+  .cleanup-safe { grid-template-columns: 1fr; }
+
+  /* Duplicates: stack list above main */
+  .view-dups {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    height: auto;
+    overflow: visible;
+  }
+  .dup-list {
+    max-height: 260px;
+    border-right: 0;
+    border-bottom: 0.5px solid var(--border-soft);
+    overflow-x: auto;
+    overflow-y: visible;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 240px;
+  }
+  .dup-list-head { display: none; }
+  .dup-list-item { border-bottom: 0; border-right: 0.5px solid var(--border-soft); }
+  .dup-head {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 20px 16px 16px;
+    gap: 14px;
+  }
+  .dup-head h2 { font-size: 22px; }
+  .dup-head-acts { width: 100%; }
+  .dup-head-acts .btn { flex: 1; justify-content: center; }
+  .dup-compare {
+    grid-template-columns: 1fr;
+    padding: 16px;
+    gap: 12px;
+  }
+  .dup-foot {
+    padding: 12px 16px;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .dup-foot-keys { display: none; }
+
+  /* Modals */
+  .modal-veil { padding: 12px; }
+  .modal {
+    width: 100% !important;
+    max-width: none;
+  }
+  .modal-head { padding: 20px 18px 14px; }
+  .modal-title { font-size: 20px; }
+  .modal-foot {
+    padding: 14px 18px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .scan-status { padding: 6px 18px 14px; }
+  .scan-stats { grid-template-columns: repeat(2, 1fr); padding: 0 18px; gap: 4px; }
+  .stat { padding: 12px 8px 12px 0; }
+  .stat-value { font-size: 20px; }
+  .scan-log { padding: 14px 18px 6px; }
+
+  /* Rename modal — preview rows */
+  .rename-modal .rn-presets { grid-template-columns: 1fr 1fr; padding: 0 18px 14px; }
+  .rn-preview { padding: 0 18px 8px; }
+  .rn-row, .rn-preview-head {
+    grid-template-columns: 36px 1fr;
+    gap: 10px;
+  }
+  .rn-row svg, .rn-preview-head svg { display: none; }
+  .rn-new { grid-column: 1 / -1; padding-left: 46px; }
+
+  /* AI Suggestions */
+  .sg-head {
+    flex-direction: column;
+    gap: 14px;
+    padding-bottom: 18px;
+    margin-bottom: 18px;
+  }
+  .sg-head h2 { font-size: 22px; line-height: 1.2; }
+  .sg-head-actions { width: 100%; }
+  .sg-head-actions .btn { flex: 1; justify-content: center; }
+  .sg-card {
+    grid-template-columns: 40px 1fr;
+    padding: 16px;
+    gap: 14px;
+  }
+  .sg-card-aff {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 0.5px solid var(--border-soft);
+    padding-left: 0;
+    padding-top: 12px;
+    text-align: left;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .sg-aff-n { font-size: 20px; }
+  .sg-card-actions { flex-wrap: wrap; }
+
+  /* Quality / People / Trash views — headline shrink */
+  .qv-head {
+    flex-direction: column;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .qv-head h2 { font-size: 22px; }
+  .qv-head > div:last-child {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .qv-head > div:last-child .btn {
+    flex: 1;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  /* Search hero */
+  .search-hero { margin-top: 36px; padding: 0 6px; }
+  .sh-headline { font-size: 30px; }
+  .sh-explain { grid-template-columns: 1fr; }
+  .sh-card { border-right: 0; border-bottom: 0.5px solid var(--border-soft); }
+  .sh-card:last-child { border-bottom: 0; }
+
+  /* Empty state CTA bigger */
+  .trash-empty { padding: 60px 16px; }
+
+  /* General buttons — bigger tap targets */
+  .btn { padding: 12px 16px; font-size: 13px; min-height: 44px; }
+  .btn-sm { padding: 9px 12px; font-size: 12px; min-height: 36px; }
+  .seg button { padding: 10px 12px; }
+}
+
+@media (max-width: 480px) {
+  /* Even tighter on phone-sized */
+  .lib-grid.uniform { grid-template-columns: repeat(2, 1fr); }
+  .ch-num { font-size: 56px; }
+  .scan-stats { grid-template-columns: 1fr 1fr; }
+  .sg-aff-n { font-size: 18px; }
+}
+
 /* ─────────────────────── Event hero ─────────────────────── */
 .ev-hero {
   position: relative;

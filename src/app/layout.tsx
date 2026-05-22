@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -19,6 +19,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Lumen — Local AI Photo Manager",
   description: "Privacy-first AI photo organizer. Finds duplicates, classifies media, suggests cleanup — all local.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: "#0e0d10",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

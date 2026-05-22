@@ -29,6 +29,7 @@ export function LumenApp() {
   const [gridStyle, setGridStyle] = useState<GridStyle>("masonry");
   const [showScan, setShowScan] = useState(false);
   const [showAi, setShowAi] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [focusCtx, setFocusCtx] = useState<FocusContext | null>(null);
 
   const summary = useLibraryStore((s) => s.summary);
@@ -69,8 +70,15 @@ export function LumenApp() {
     ? { name: summary.folderName, count: summary.itemCount }
     : null;
 
+  // On mobile / narrow viewports we skip the scale-to-fit and let the layout
+  // flow natively via CSS media queries. Above ~900px we keep the desktop
+  // 1380×880 fit.
   useEffect(() => {
     const apply = () => {
+      if (window.innerWidth < 900) {
+        document.documentElement.style.setProperty("--fit", "1");
+        return;
+      }
       const pad = 28;
       const w = (window.innerWidth - pad * 2) / 1380;
       const h = (window.innerHeight - pad * 2) / 880;
@@ -96,6 +104,8 @@ export function LumenApp() {
     setView(v);
     setSelected(new Set());
     if (v !== "focus") setFocusCtx(null);
+    // Close mobile drawer whenever the user navigates
+    setMobileMenuOpen(false);
   };
 
   const openFocus = (ctx: FocusContext) => {
@@ -182,17 +192,24 @@ export function LumenApp() {
     <div className="stage">
       <div className="win-fit">
         <div className="win">
+          <div
+            className="sb-backdrop"
+            data-open={mobileMenuOpen ? "1" : "0"}
+            onClick={() => setMobileMenuOpen(false)}
+          />
           <Sidebar
             view={view}
             setView={switchView}
-            onScan={() => setShowScan(true)}
-            onRunAi={() => setShowAi(true)}
+            onScan={() => { setShowScan(true); setMobileMenuOpen(false); }}
+            onRunAi={() => { setShowAi(true); setMobileMenuOpen(false); }}
             realLibrary={realLibraryInfo}
-            onClearLibrary={hasRealLibrary ? clearLibrary : undefined}
+            onClearLibrary={hasRealLibrary ? () => { clearLibrary(); setMobileMenuOpen(false); } : undefined}
             dupGroupCount={activeDupGroups.length}
             reclaimable={activeCleanup?.reclaim ?? 0}
             suggestionCount={suggestionCount}
             stagedCount={staged.size}
+            isOpen={mobileMenuOpen}
+            onClose={() => setMobileMenuOpen(false)}
           />
           <div className="main">
             <Topbar
@@ -208,6 +225,7 @@ export function LumenApp() {
               dupGroupCount={activeDupGroups.length}
               reclaimable={activeCleanup?.reclaim ?? 0}
               isReal={hasRealLibrary}
+              onOpenMobileMenu={() => setMobileMenuOpen(true)}
             />
             <div className="content">{body}</div>
           </div>

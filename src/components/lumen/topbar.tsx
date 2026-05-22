@@ -4,7 +4,7 @@ import { useLibraryStore } from "@/state/library-store";
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
   IconSearch, IconMasonry, IconGrid, IconRefresh,
-  IconX, IconTrash,
+  IconX, IconTrash, IconMenu,
 } from "./icons";
 import type { GridStyle, View } from "./types";
 
@@ -21,6 +21,7 @@ interface Props {
   dupGroupCount: number;
   reclaimable: number;
   isReal: boolean;
+  onOpenMobileMenu?: () => void;
 }
 
 const TITLES: Record<View, string> = {
@@ -38,7 +39,7 @@ const TITLES: Record<View, string> = {
 
 export function Topbar({
   view, gridStyle, setGridStyle, onClearSel, selectedCount, selectedIds, query, setQuery,
-  photoCount, dupGroupCount, reclaimable, isReal,
+  photoCount, dupGroupCount, reclaimable, isReal, onOpenMobileMenu,
 }: Props) {
   const stageItems = useLibraryStore((s) => s.stageItems);
 
@@ -64,9 +65,20 @@ export function Topbar({
 
   return (
     <header className="topbar">
-      <div className="tb-left">
-        <h1 className="tb-title">{TITLES[view] || "Lumen"}</h1>
-        {sub && <span className="tb-sub">{sub}</span>}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        {onOpenMobileMenu && (
+          <button
+            className="mobile-only hamburger"
+            onClick={onOpenMobileMenu}
+            aria-label="Open menu"
+          >
+            <IconMenu size={16} />
+          </button>
+        )}
+        <div className="tb-left">
+          <h1 className="tb-title">{TITLES[view] || "Lumen"}</h1>
+          {sub && <span className="tb-sub">{sub}</span>}
+        </div>
       </div>
 
       <div className="tb-search">
