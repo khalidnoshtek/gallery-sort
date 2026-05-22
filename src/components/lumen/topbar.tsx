@@ -3,7 +3,7 @@
 import { useLibraryStore } from "@/state/library-store";
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
-  IconSearch, IconMasonry, IconGrid, IconList, IconRefresh,
+  IconSearch, IconMasonry, IconGrid, IconRefresh,
   IconX, IconTrash,
 } from "./icons";
 import type { GridStyle, View } from "./types";
@@ -25,13 +25,14 @@ interface Props {
 
 const TITLES: Record<View, string> = {
   library: "Library",
-  timeline: "Timeline",
+  timeline: "By month",
   cleanup: "Cleanup",
   dups: "Duplicates",
   trash: "Staged for trash",
   search: "Search",
   suggest: "AI Suggestions",
   people: "People",
+  focus: "Review",
 };
 
 export function Topbar({
@@ -43,6 +44,7 @@ export function Topbar({
   const subForView = () => {
     if (!isReal) return null;
     if (view === "library") return `${fmtCount(photoCount)} items indexed`;
+    if (view === "timeline") return "Grouped by file modified date";
     if (view === "cleanup") return reclaimable > 0 ? `${fmtBytes(reclaimable)} reclaimable` : "Nothing to clean up";
     if (view === "dups") return `${dupGroupCount} group${dupGroupCount === 1 ? "" : "s"}`;
     return null;
@@ -54,6 +56,10 @@ export function Topbar({
     stageItems(selectedIds);
     onClearSel();
   };
+
+  // Grid switcher: only shown in views where it makes sense, and never includes
+  // the "timeline" option (that's the "By month" view, accessed from the sidebar).
+  const showGridSwitcher = view === "library" || view === "search";
 
   return (
     <header className="topbar">
@@ -67,18 +73,29 @@ export function Topbar({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={isReal ? "Search filename, path, location…" : "Scan a folder to enable search"}
+          placeholder={isReal ? "Search filename, path, or AI semantic" : "Scan a folder to enable search"}
           disabled={!isReal}
         />
         <kbd>⌘K</kbd>
       </div>
 
       <div className="tb-tools">
-        {isReal && (view === "library" || view === "search") && (
+        {showGridSwitcher && (
           <div className="seg">
-            <button data-on={gridStyle === "masonry" ? "1" : "0"} onClick={() => setGridStyle("masonry")} title="Masonry"><IconMasonry size={14} /></button>
-            <button data-on={gridStyle === "uniform" ? "1" : "0"} onClick={() => setGridStyle("uniform")} title="Uniform grid"><IconGrid size={14} /></button>
-            <button data-on={gridStyle === "timeline" ? "1" : "0"} onClick={() => setGridStyle("timeline")} title="Timeline"><IconList size={14} /></button>
+            <button
+              data-on={gridStyle === "masonry" ? "1" : "0"}
+              onClick={() => setGridStyle("masonry")}
+              title="Masonry"
+            >
+              <IconMasonry size={14} />
+            </button>
+            <button
+              data-on={gridStyle === "uniform" ? "1" : "0"}
+              onClick={() => setGridStyle("uniform")}
+              title="Uniform grid"
+            >
+              <IconGrid size={14} />
+            </button>
           </div>
         )}
         <button className="tb-btn ghost" title="Rescan"><IconRefresh size={15} /></button>

@@ -80,6 +80,9 @@ export const IconPlus = (p: IconProps) => (
 export const IconChevD = (p: IconProps) => (
   <Icon {...p}><path d="M6 9l6 6 6-6"/></Icon>
 );
+export const IconChevL = (p: IconProps) => (
+  <Icon {...p}><path d="M15 6l-6 6 6 6"/></Icon>
+);
 export const IconArrowR = (p: IconProps) => (
   <Icon {...p}><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></Icon>
 );

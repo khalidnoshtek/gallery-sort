@@ -13,18 +13,22 @@ import { SearchView } from "./search-view";
 import { SuggestView } from "./suggest-view";
 import { TrashView } from "./trash-view";
 import { PeopleView } from "./people-view";
+import { FocusView } from "./focus-view";
 import { ScanModal } from "./scan-modal";
 import { AiModal } from "./ai-modal";
 import { EmptyState } from "./empty-state";
-import type { GridStyle, View } from "./types";
+import type { FocusContext, GridStyle, View } from "./types";
 
 export function LumenApp() {
   const [view, setView] = useState<View>("library");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
-  const [gridStyle, setGridStyle] = useState<GridStyle>("timeline");
+  // gridStyle now applies only to Library / Search. Timeline view is always
+  // grouped by month — they're no longer the same thing.
+  const [gridStyle, setGridStyle] = useState<GridStyle>("masonry");
   const [showScan, setShowScan] = useState(false);
   const [showAi, setShowAi] = useState(false);
+  const [focusCtx, setFocusCtx] = useState<FocusContext | null>(null);
 
   const summary = useLibraryStore((s) => s.summary);
   const realItems = useLibraryStore((s) => s.items);
@@ -90,6 +94,19 @@ export function LumenApp() {
     if (v !== "search") setQuery("");
     setView(v);
     setSelected(new Set());
+    if (v !== "focus") setFocusCtx(null);
+  };
+
+  const openFocus = (ctx: FocusContext) => {
+    setFocusCtx(ctx);
+    setView("focus");
+    setSelected(new Set());
+  };
+
+  const backFromFocus = () => {
+    const src = focusCtx?.source ?? "library";
+    setFocusCtx(null);
+    setView(src);
   };
 
   let body: React.ReactNode;
@@ -99,40 +116,58 @@ export function LumenApp() {
   } else {
     switch (view) {
       case "library":
+        // Library never uses timeline grid — it'd be identical to "By month".
         body = (
-          <LibraryView photos={activePhotos} selected={selected} setSelected={setSelected}
-                       gridStyle={gridStyle} useMock={false} />
+          <LibraryView
+            photos={activePhotos}
+            selected={selected}
+            setSelected={setSelected}
+            gridStyle={gridStyle === "timeline" ? "masonry" : gridStyle}
+            useMock={false}
+          />
         );
         break;
       case "timeline":
+        // Timeline ALWAYS groups by month with date headers — clearly different.
         body = (
-          <LibraryView photos={activePhotos} selected={selected} setSelected={setSelected}
-                       gridStyle="timeline" useMock={false} />
+          <LibraryView
+            photos={activePhotos}
+            selected={selected}
+            setSelected={setSelected}
+            gridStyle="timeline"
+            useMock={false}
+          />
         );
         break;
       case "cleanup":
-        body = activeCleanup
-          ? <CleanupView setView={switchView} cleanup={activeCleanup} />
-          : null;
+        body = activeCleanup ? <CleanupView setView={switchView} cleanup={activeCleanup} /> : null;
         break;
       case "dups":
         body = <DupView groups={activeDupGroups} />;
         break;
       case "search":
         body = (
-          <SearchView query={query} setQuery={setQuery}
-                      photos={activePhotos} semanticMap={activeSemanticMap}
-                      gridStyle={gridStyle} useMock={false} />
+          <SearchView
+            query={query}
+            setQuery={setQuery}
+            photos={activePhotos}
+            semanticMap={activeSemanticMap}
+            gridStyle={gridStyle === "timeline" ? "masonry" : gridStyle}
+            useMock={false}
+          />
         );
         break;
       case "suggest":
-        body = <SuggestView setView={switchView} />;
+        body = <SuggestView goToTrash={() => switchView("trash")} openFocus={openFocus} />;
         break;
       case "people":
-        body = <PeopleView />;
+        body = <PeopleView openFocus={openFocus} onRunAi={() => setShowAi(true)} />;
         break;
       case "trash":
         body = <TrashView />;
+        break;
+      case "focus":
+        body = focusCtx ? <FocusView ctx={focusCtx} onBack={backFromFocus} /> : null;
         break;
       default:
         body = null;

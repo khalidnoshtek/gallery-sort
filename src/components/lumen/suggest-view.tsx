@@ -9,6 +9,7 @@ import {
   IconFile, IconCheck, IconRefresh, IconArrowR, IconSparkle, IconRestore, IconFlash,
 } from "./icons";
 import { DiagnosticsPanel } from "./diagnostics-panel";
+import type { FocusContext } from "./types";
 
 const ICON_MAP: Record<SuggestionIcon, ComponentType<{ size?: number }>> = {
   save: IconBroom,
@@ -23,10 +24,11 @@ const ICON_MAP: Record<SuggestionIcon, ComponentType<{ size?: number }>> = {
 };
 
 interface Props {
-  setView: (v: "trash") => void;
+  goToTrash: () => void;
+  openFocus: (ctx: FocusContext) => void;
 }
 
-export function SuggestView({ setView }: Props) {
+export function SuggestView({ goToTrash, openFocus }: Props) {
   const items = useLibraryStore((s) => s.items);
   const exact = useLibraryStore((s) => s.duplicatesExact);
   const near = useLibraryStore((s) => s.duplicatesNear);
@@ -42,16 +44,21 @@ export function SuggestView({ setView }: Props) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const visible = suggestions.filter((s) => !dismissed.has(s.id));
 
-  const stagedFromAll = visible.reduce(
-    (a, s) => a + s.itemIds.filter((id) => staged.has(id)).length,
-    0,
-  );
   const totalPossibleBytes = visible.reduce((a, s) => a + s.bytes, 0);
 
   const applyAllSafe = () => {
     const safeSugs = visible.filter((s) => s.id === "dups-exact" || s.id === "dups-near");
     const ids = safeSugs.flatMap((s) => s.itemIds);
     if (ids.length > 0) stageItems(ids);
+  };
+
+  const review = (s: RealSuggestion) => {
+    openFocus({
+      source: "suggest",
+      label: s.title,
+      sublabel: s.body,
+      itemIds: s.itemIds,
+    });
   };
 
   return (
@@ -68,10 +75,11 @@ export function SuggestView({ setView }: Props) {
             {visible.length > 0 ? (
               <>
                 Up to <strong style={{ color: "var(--text)" }}>{fmtBytes(totalPossibleBytes)}</strong> reclaimable across {fmtCount(visible.reduce((a, s) => a + s.itemIds.length, 0))} files.
-                Staging is reversible — nothing leaves disk until you confirm in Trash.
+                Click <strong style={{ color: "var(--text)" }}>Review</strong> on any card to keep/trash photos one by one,
+                or <strong style={{ color: "var(--text)" }}>Stage all</strong> to add the whole bucket to Trash.
               </>
             ) : (
-              <>Your library is already in pretty good shape — no duplicates, no obvious junk. Run AI analysis to enable semantic search and face clustering, or check the diagnostics panel below.</>
+              <>Your library is already in pretty good shape — no duplicates, no obvious junk. Check the diagnostics below to see what was checked.</>
             )}
           </p>
         </div>
@@ -79,7 +87,7 @@ export function SuggestView({ setView }: Props) {
           <button className="btn ghost" onClick={() => setDismissed(new Set())}>
             <IconRefresh size={13} /> Reset
           </button>
-          <button className="btn primary" onClick={applyAllSafe} disabled={visible.length === 0 || !visible.some(s => s.id.startsWith("dups"))}>
+          <button className="btn primary" onClick={applyAllSafe} disabled={!visible.some(s => s.id.startsWith("dups"))}>
             <IconCheck size={13} /> Stage all duplicates
           </button>
         </div>
@@ -100,25 +108,26 @@ export function SuggestView({ setView }: Props) {
                 key={s.id}
                 suggestion={s}
                 stagedCount={s.itemIds.filter((id) => staged.has(id)).length}
-                onStage={() => stageItems(s.itemIds)}
+                onReview={() => review(s)}
+                onStageAll={() => stageItems(s.itemIds)}
                 onUnstage={() => unstageItems(s.itemIds)}
                 onDismiss={() => setDismissed((d) => new Set([...d, s.id]))}
               />
             ))}
           </div>
 
-          {stagedFromAll > 0 && (
+          {staged.size > 0 && (
             <div style={{ marginTop: 32, display: "flex", justifyContent: "space-between", alignItems: "center", padding: 22, borderRadius: 12, border: "0.5px solid var(--border-soft)", background: "var(--bg-2)" }}>
               <div>
                 <div style={{ fontFamily: "var(--display)", fontSize: 18, letterSpacing: "-0.022em", marginBottom: 4 }}>
                   {fmtCount(staged.size)} file{staged.size === 1 ? "" : "s"} staged for cleanup
                 </div>
                 <div style={{ color: "var(--muted)", fontSize: 12.5 }}>
-                  Review in Trash. Nothing is deleted until you confirm there.
+                  Apply (move or delete) from the Trash view.
                 </div>
               </div>
-              <button className="btn primary" onClick={() => setView("trash")}>
-                Review staged <IconArrowR size={13} />
+              <button className="btn primary" onClick={goToTrash}>
+                Open Trash <IconArrowR size={13} />
               </button>
             </div>
           )}
@@ -131,12 +140,13 @@ export function SuggestView({ setView }: Props) {
 interface CardProps {
   suggestion: RealSuggestion;
   stagedCount: number;
-  onStage: () => void;
+  onReview: () => void;
+  onStageAll: () => void;
   onUnstage: () => void;
   onDismiss: () => void;
 }
 
-function SuggestionCard({ suggestion, stagedCount, onStage, onUnstage, onDismiss }: CardProps) {
+function SuggestionCard({ suggestion, stagedCount, onReview, onStageAll, onUnstage, onDismiss }: CardProps) {
   const Ic = ICON_MAP[suggestion.icon] ?? IconSparkle;
   const isFullyStaged = stagedCount === suggestion.itemIds.length && stagedCount > 0;
   const isPartiallyStaged = stagedCount > 0 && !isFullyStaged;
@@ -148,21 +158,21 @@ function SuggestionCard({ suggestion, stagedCount, onStage, onUnstage, onDismiss
         <h3>{suggestion.title}</h3>
         <p>{suggestion.body}</p>
         <div className="sg-card-actions">
+          <button className="btn-sm ghost" onClick={onReview}>
+            Review {suggestion.itemIds.length} <IconArrowR size={11} />
+          </button>
           {isFullyStaged ? (
-            <button className="btn-sm ghost" onClick={onUnstage}>
+            <button className="btn-sm primary" onClick={onUnstage}>
               <IconRestore size={12} /> Unstage all
             </button>
           ) : (
-            <>
-              <button className="btn-sm ghost" onClick={onDismiss}>Dismiss</button>
-              <button className="btn-sm primary" onClick={onStage}>
-                {isPartiallyStaged
-                  ? `Stage remaining ${suggestion.itemIds.length - stagedCount}`
-                  : `Stage ${fmtCount(suggestion.itemIds.length)}`}
-                {" "}<IconArrowR size={11} />
-              </button>
-            </>
+            <button className="btn-sm primary" onClick={onStageAll}>
+              {isPartiallyStaged
+                ? `Stage remaining ${suggestion.itemIds.length - stagedCount}`
+                : `Stage all`}
+            </button>
           )}
+          <button className="btn-sm ghost" onClick={onDismiss} style={{ marginLeft: "auto" }}>Dismiss</button>
         </div>
       </div>
       <div className="sg-card-aff">

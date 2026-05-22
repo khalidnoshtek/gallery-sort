@@ -26,7 +26,7 @@ function SideItem({ icon: Ic, label, active, count, onClick, disabled }: SideIte
       onClick={disabled ? undefined : onClick}
       className="side-item"
       data-active={active ? "1" : "0"}
-      style={{ opacity: disabled ? 0.35 : 1 }}
+      style={{ opacity: disabled ? 0.35 : 1, cursor: disabled ? "not-allowed" : "default" }}
     >
       <span className="si-icon"><Ic size={15} /></span>
       <span className="si-label">{label}</span>
@@ -81,10 +81,11 @@ export function Sidebar({
 
       <div className="sb-section">
         <SideItem icon={IconLibrary} label="Library" active={view === "library"} count={hasLib ? fmtCount(realLibrary.count) : "—"} onClick={() => setView("library")} disabled={!hasLib} />
-        <SideItem icon={IconClock} label="Timeline" active={view === "timeline"} onClick={() => setView("timeline")} disabled={!hasLib} />
+        <SideItem icon={IconClock} label="By month" active={view === "timeline"} onClick={() => setView("timeline")} disabled={!hasLib} />
         <SideItem icon={IconSparkle} label="AI Suggestions" active={view === "suggest"} count={hasLib ? suggestionCount : "—"} onClick={() => setView("suggest")} disabled={!hasLib} />
-        <SideItem icon={IconSearch} label="Search" active={view === "search"} count={hasClip ? "semantic" : undefined} onClick={() => setView("search")} disabled={!hasLib} />
-        <SideItem icon={IconFace} label="People" active={view === "people"} count={peopleCount > 0 ? "AI" : "—"} onClick={() => setView("people")} disabled={!hasLib || peopleCount === 0} />
+        <SideItem icon={IconSearch} label="Search" active={view === "search"} count={hasClip ? "AI" : undefined} onClick={() => setView("search")} disabled={!hasLib} />
+        {/* People is always clickable when library exists — empty state inside explains. */}
+        <SideItem icon={IconFace} label="People" active={view === "people"} count={peopleCount > 0 ? fmtCount(peopleCount) : "—"} onClick={() => setView("people")} disabled={!hasLib} />
       </div>
 
       <div className="sb-divider" />
@@ -109,17 +110,21 @@ export function Sidebar({
       <div className="sb-spacer" />
 
       <div className="sb-footer">
-        {hasLib && !hasClip && (
+        {hasLib && (
           <button
             onClick={onRunAi}
             className="sb-scan-btn"
-            style={{ background: "transparent", color: "var(--text)", border: "0.5px solid var(--accent)" }}
+            style={{
+              background: hasClip ? "transparent" : "var(--text)",
+              color: hasClip ? "var(--text)" : "#0e0d10",
+              border: hasClip ? "0.5px solid var(--border)" : "0",
+            }}
           >
             <IconSparkle size={14} />
-            <span>Enable AI analysis</span>
+            <span>{hasClip ? "Re-run AI analysis" : "Enable AI analysis"}</span>
           </button>
         )}
-        <button className="sb-scan-btn" onClick={onScan}>
+        <button className="sb-scan-btn" onClick={onScan} style={hasLib ? { background: "transparent", color: "var(--text)", border: "0.5px solid var(--border)" } : {}}>
           <IconPlus size={14} />
           <span>{hasLib ? "Scan another folder" : "Scan a folder"}</span>
         </button>
