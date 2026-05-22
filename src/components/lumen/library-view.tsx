@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useLibraryStore } from "@/state/library-store";
 import { PhotoCard } from "./photo-card";
+import { Lightbox } from "./lightbox";
+import { SortMenu } from "./sort-menu";
 import { monthOf, type Photo } from "@/lib/lumen/data";
+import { sortItems, sortPhotos, type SortKey } from "@/lib/lumen/sort";
 import type { GridStyle } from "./types";
 
 function rectsOverlap(a: { left: number; right: number; top: number; bottom: number }, b: typeof a) {
@@ -27,8 +31,22 @@ interface DragState {
 }
 
 export function LibraryView({ photos, selected, setSelected, gridStyle, useMock = false }: Props) {
+  const items = useLibraryStore((s) => s.items);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>(gridStyle === "timeline" ? "date-desc" : "date-desc");
+
+  // Build a sorted version of `photos` for display. For timeline, the
+  // "sortKey" decides ordering within each month section.
+  const sortedPhotos = useMemo(() => sortPhotos(photos, sortKey), [photos, sortKey]);
+
+  // Sorted real items in the same order as sortedPhotos — used by the lightbox.
+  const sortedItems = useMemo(() => {
+    const byId = new Map(items.map((it) => [it.id, it]));
+    const out = sortedPhotos.map((p) => byId.get(p.id)).filter((x): x is NonNullable<typeof x> => Boolean(x));
+    return out;
+  }, [sortedPhotos, items]);
 
   const toggle = useCallback(
     (id: string) => {
@@ -97,13 +115,18 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, useMock 
 
   const groups = useMemo(() => {
     const map = new Map<string, Photo[]>();
-    photos.forEach((p) => {
+    sortedPhotos.forEach((p) => {
       const key = monthOf(p.date);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(p);
     });
-    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [photos]);
+    // Sort month buckets by recency of their newest item (regardless of inside-sort).
+    return [...map.entries()].sort((a, b) => {
+      const newestA = Math.max(...a[1].map((p) => new Date(p.date).getTime()));
+      const newestB = Math.max(...b[1].map((p) => new Date(p.date).getTime()));
+      return newestB - newestA;
+    });
+  }, [sortedPhotos]);
 
   const heightFor = (i: number) => {
     if (gridStyle === "uniform" || gridStyle === "timeline") return 180;
@@ -123,37 +146,134 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, useMock 
     />
   );
 
+  // Click handler that decides between drag-select (no-op) and lightbox.
+  const onCardClick = (photoId: string) => {
+    const idx = sortedPhotos.findIndex((p) => p.id === photoId);
+    if (idx >= 0) setLightboxIndex(idx);
+  };
+
+  const sortBar = (
+    <div style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "10px 28px 0",
+      gap: 10,
+    }}>
+      <span style={{ color: "var(--muted)", fontSize: 11.5, letterSpacing: "-0.005em" }}>
+        {sortedPhotos.length.toLocaleString()} photo{sortedPhotos.length === 1 ? "" : "s"}
+      </span>
+      <SortMenu value={sortKey} onChange={setSortKey} />
+    </div>
+  );
+
   if (gridStyle === "timeline") {
     return (
-      <div ref={containerRef} className="lib-scroll" onMouseDown={onMouseDown}>
-        {groups.map(([month, items]) => (
-          <section key={month} className="tl-section">
-            <header className="tl-head">
-              <div>
-                <div className="tl-month">{month}</div>
-                <div className="tl-sub">{items.length} photo{items.length === 1 ? "" : "s"}</div>
+      <>
+        {sortBar}
+        <div ref={containerRef} className="lib-scroll" onMouseDown={onMouseDown}>
+          {groups.map(([month, items]) => (
+            <section key={month} className="tl-section">
+              <header className="tl-head">
+                <div>
+                  <div className="tl-month">{month}</div>
+                  <div className="tl-sub">{items.length} photo{items.length === 1 ? "" : "s"}</div>
+                </div>
+              </header>
+              <div className="lib-grid uniform">
+                {items.map((p) => (
+                  <ClickableCard
+                    key={p.id}
+                    photo={p}
+                    selected={selected.has(p.id)}
+                    onToggle={toggle}
+                    onOpen={() => onCardClick(p.id)}
+                    height={180}
+                    useMock={useMock}
+                  />
+                ))}
               </div>
-            </header>
-            <div className="lib-grid uniform">
-              {items.map((p) => (
-                <PhotoCard key={p.id} photo={p} selected={selected.has(p.id)} onToggle={toggle} height={180} useMock={useMock} />
-              ))}
-            </div>
-          </section>
-        ))}
-        {dragRect}
-      </div>
+            </section>
+          ))}
+          {dragRect}
+        </div>
+        {lightboxIndex !== null && (
+          <Lightbox
+            items={sortedItems}
+            startIndex={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <div ref={containerRef} className="lib-scroll" onMouseDown={onMouseDown}>
-      <div className={`lib-grid ${gridStyle}`}>
-        {photos.map((p, i) => (
-          <PhotoCard key={p.id} photo={p} selected={selected.has(p.id)} onToggle={toggle} height={heightFor(i)} useMock={useMock} />
-        ))}
+    <>
+      {sortBar}
+      <div ref={containerRef} className="lib-scroll" onMouseDown={onMouseDown}>
+        <div className={`lib-grid ${gridStyle}`}>
+          {sortedPhotos.map((p, i) => (
+            <ClickableCard
+              key={p.id}
+              photo={p}
+              selected={selected.has(p.id)}
+              onToggle={toggle}
+              onOpen={() => onCardClick(p.id)}
+              height={heightFor(i)}
+              useMock={useMock}
+            />
+          ))}
+        </div>
+        {dragRect}
       </div>
-      {dragRect}
+      {lightboxIndex !== null && (
+        <Lightbox
+          items={sortedItems}
+          startIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function ClickableCard({
+  photo,
+  selected,
+  onToggle,
+  onOpen,
+  height,
+  useMock,
+}: {
+  photo: Photo;
+  selected: boolean;
+  onToggle: (id: string) => void;
+  onOpen: () => void;
+  height: number;
+  useMock: boolean;
+}) {
+  // Wrap the existing PhotoCard with a click handler that opens the lightbox
+  // when the user clicks the image area (not the check button).
+  return (
+    <div
+      onClick={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest(".card-check")) return;
+        onOpen();
+      }}
+      style={{ cursor: "zoom-in" }}
+    >
+      <PhotoCard
+        photo={photo}
+        selected={selected}
+        onToggle={onToggle}
+        height={height}
+        useMock={useMock}
+      />
     </div>
   );
 }
+
+// Re-export sortItems for callers (LumenApp uses it for the focus view sort)
+export { sortItems };
