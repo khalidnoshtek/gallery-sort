@@ -15,11 +15,16 @@ interface Props {
   onClose: () => void;
 }
 
-// Cache full-res blob URLs by itemId so navigating back and forth doesn't
-// re-read files. Cleared on close.
+// Cache full-res blob URLs by itemId.
+// peek(id) returns synchronously if available (no microtask delay = no blink
+// when navigating to an already-loaded neighbor).
 function useImageUrlCache() {
   const cacheRef = useRef<Map<string, string>>(new Map());
   const inFlightRef = useRef<Map<string, Promise<string | null>>>(new Map());
+
+  const peek = useCallback((id: string): string | undefined => {
+    return cacheRef.current.get(id);
+  }, []);
 
   const get = useCallback(async (item: BrowserMediaItem): Promise<string | null> => {
     const cached = cacheRef.current.get(item.id);
@@ -55,13 +60,18 @@ function useImageUrlCache() {
     inFlightRef.current.clear();
   }, []);
 
-  return { get, clear };
+  return { peek, get, clear };
 }
 
 export function Lightbox({ items, startIndex, onClose }: Props) {
   const [index, setIndex] = useState(Math.max(0, Math.min(startIndex, items.length - 1)));
+  // url = "what we want the <img> to show right now".
+  // null = nothing rendered yet (fresh open with no cached image).
   const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // `pending` is for the very first-load case only — used to show a "Loading…"
+  // text. We never use it to dim or fade an existing image (that's what was
+  // causing the blink during navigation).
+  const [pending, setPending] = useState(true);
   const cache = useImageUrlCache();
 
   const staged = useLibraryStore((s) => s.stagedForTrash);
@@ -70,24 +80,40 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
 
   const item = items[index];
 
-  // Load current + prefetch neighbors
+  // Snap the URL synchronously if cached; otherwise fetch in the background
+  // and update when ready. Critically: we don't blank or dim the previous
+  // image while fetching — the browser keeps the previous decoded bitmap
+  // on screen until the new one is ready, no flash.
   useEffect(() => {
     if (!item) return;
     let alive = true;
-    setLoading(true);
-    cache.get(item).then((u) => {
-      if (!alive) return;
-      setUrl(u);
-      setLoading(false);
-    });
+
+    const cached = cache.peek(item.id);
+    if (cached) {
+      setUrl(cached);
+      setPending(false);
+    } else {
+      // Don't clear `url` — keep showing the previous image until the new
+      // one resolves. Only set `pending` if we have nothing at all.
+      if (url === null) setPending(true);
+      cache.get(item).then((u) => {
+        if (!alive) return;
+        setUrl(u);
+        setPending(false);
+      });
+    }
+
+    // Prefetch neighbors so the next nav will be a cache hit.
     const next = items[index + 1];
     const prev = items[index - 1];
-    if (next) cache.get(next);
-    if (prev) cache.get(prev);
+    if (next && !cache.peek(next.id)) cache.get(next);
+    if (prev && !cache.peek(prev.id)) cache.get(prev);
+
     return () => {
       alive = false;
     };
-  }, [item, index, items, cache]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item, index, items]);
 
   // Cleanup blob URLs on unmount
   useEffect(() => {
@@ -163,11 +189,8 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
         zIndex: 200,
         display: "flex",
         flexDirection: "column",
-        animation: "lumenFadeIn 0.15s ease-out",
       }}
     >
-      <style>{`@keyframes lumenFadeIn { from { opacity: 0; } to { opacity: 1; } }`}</style>
-
       {/* Top bar */}
       <div
         onClick={(e) => e.stopPropagation()}
@@ -233,6 +256,7 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
               justifyContent: "center",
               cursor: "default",
               backdropFilter: "blur(10px)",
+              zIndex: 2,
             }}
           >
             <IconChevL size={18} />
@@ -258,6 +282,7 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
               justifyContent: "center",
               cursor: "default",
               backdropFilter: "blur(10px)",
+              zIndex: 2,
             }}
           >
             <IconChevR size={18} />
@@ -276,15 +301,16 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
               userSelect: "none",
               borderRadius: 4,
               boxShadow: "0 30px 80px rgba(0,0,0,0.5)",
-              opacity: loading ? 0.6 : 1,
-              transition: "opacity 0.15s",
               aspectRatio: aspect ?? undefined,
+              // No opacity transition — browsers keep the previous decoded
+              // image visible during src change. Transitioning opacity is
+              // what caused the blink.
             }}
           />
+        ) : pending ? (
+          <div style={{ color: "var(--muted)", fontSize: 13 }}>Loading…</div>
         ) : (
-          <div style={{ color: "var(--muted)", fontSize: 13 }}>
-            {loading ? "Loading…" : "Preview unavailable"}
-          </div>
+          <div style={{ color: "var(--muted)", fontSize: 13 }}>Preview unavailable</div>
         )}
         {isStaged && (
           <div style={{
@@ -298,6 +324,7 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
             fontSize: 11,
             fontWeight: 500,
             letterSpacing: "-0.005em",
+            zIndex: 2,
           }}>
             STAGED FOR TRASH
           </div>
@@ -315,9 +342,10 @@ export function Lightbox({ items, startIndex, onClose }: Props) {
           padding: "16px 28px",
           borderTop: "0.5px solid var(--border-soft)",
           background: "rgba(0,0,0,0.4)",
+          flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", gap: 24, fontSize: 12, color: "var(--secondary)", letterSpacing: "-0.005em" }}>
+        <div style={{ display: "flex", gap: 24, fontSize: 12, color: "var(--secondary)", letterSpacing: "-0.005em", flexWrap: "wrap" }}>
           <span><span style={{ color: "var(--muted)" }}>Size</span>{" "}<b style={{ color: "var(--text)", fontFamily: "var(--mono)", fontWeight: 400 }}>{fmtBytes(item.sizeBytes)}</b></span>
           {item.width && item.height && (
             <span><span style={{ color: "var(--muted)" }}>Dimensions</span>{" "}<b style={{ color: "var(--text)", fontFamily: "var(--mono)", fontWeight: 400 }}>{item.width}×{item.height}</b></span>
