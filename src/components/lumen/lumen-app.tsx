@@ -12,7 +12,9 @@ import { DupView } from "./dup-view";
 import { SearchView } from "./search-view";
 import { SuggestView } from "./suggest-view";
 import { TrashView } from "./trash-view";
+import { PeopleView } from "./people-view";
 import { ScanModal } from "./scan-modal";
+import { AiModal } from "./ai-modal";
 import { EmptyState } from "./empty-state";
 import type { GridStyle, View } from "./types";
 
@@ -22,6 +24,7 @@ export function LumenApp() {
   const [query, setQuery] = useState("");
   const [gridStyle, setGridStyle] = useState<GridStyle>("timeline");
   const [showScan, setShowScan] = useState(false);
+  const [showAi, setShowAi] = useState(false);
 
   const summary = useLibraryStore((s) => s.summary);
   const realItems = useLibraryStore((s) => s.items);
@@ -125,6 +128,9 @@ export function LumenApp() {
       case "suggest":
         body = <SuggestView setView={switchView} />;
         break;
+      case "people":
+        body = <PeopleView />;
+        break;
       case "trash":
         body = <TrashView />;
         break;
@@ -141,6 +147,7 @@ export function LumenApp() {
             view={view}
             setView={switchView}
             onScan={() => setShowScan(true)}
+            onRunAi={() => setShowAi(true)}
             realLibrary={realLibraryInfo}
             onClearLibrary={hasRealLibrary ? clearLibrary : undefined}
             dupGroupCount={activeDupGroups.length}
@@ -170,6 +177,12 @@ export function LumenApp() {
             <ScanModal
               onClose={() => setShowScan(false)}
               onComplete={() => { setShowScan(false); switchView("suggest"); }}
+            />
+          )}
+          {showAi && (
+            <AiModal
+              onClose={() => setShowAi(false)}
+              onComplete={() => { setShowAi(false); switchView("people"); }}
             />
           )}
         </div>

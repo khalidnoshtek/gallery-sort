@@ -4,14 +4,12 @@ import { type ComponentType } from "react";
 import { useLibraryStore } from "@/state/library-store";
 import { fmtBytes, fmtCount } from "@/lib/lumen/data";
 import {
-  IconLibrary, IconClock, IconSearch, IconBroom, IconDup, IconSparkle,
+  IconLibrary, IconClock, IconSearch, IconBroom, IconDup, IconSparkle, IconFace,
   IconTrash, IconFolder, IconPlus, IconRestore, LumenMark,
 } from "./icons";
 import type { View } from "./types";
 
-interface IconProps {
-  size?: number;
-}
+interface IconProps { size?: number; }
 
 interface SideItemProps {
   icon: ComponentType<IconProps>;
@@ -43,6 +41,7 @@ interface Props {
   view: View;
   setView: (v: View) => void;
   onScan: () => void;
+  onRunAi: () => void;
   realLibrary: { name: string; count: number } | null;
   onClearLibrary?: () => void;
   dupGroupCount: number;
@@ -52,11 +51,13 @@ interface Props {
 }
 
 export function Sidebar({
-  view, setView, onScan, realLibrary, onClearLibrary,
+  view, setView, onScan, onRunAi, realLibrary, onClearLibrary,
   dupGroupCount, reclaimable, suggestionCount, stagedCount,
 }: Props) {
+  const items = useLibraryStore((s) => s.items);
   const hasLib = realLibrary !== null;
-  useLibraryStore((s) => s.items.length); // re-render hint when library changes
+  const hasClip = items.some((i) => i.clipEmbedding && i.clipEmbedding.length > 0);
+  const peopleCount = items.reduce((a, i) => a + (i.faces?.length ?? 0), 0);
 
   return (
     <aside className="sidebar">
@@ -82,7 +83,8 @@ export function Sidebar({
         <SideItem icon={IconLibrary} label="Library" active={view === "library"} count={hasLib ? fmtCount(realLibrary.count) : "—"} onClick={() => setView("library")} disabled={!hasLib} />
         <SideItem icon={IconClock} label="Timeline" active={view === "timeline"} onClick={() => setView("timeline")} disabled={!hasLib} />
         <SideItem icon={IconSparkle} label="AI Suggestions" active={view === "suggest"} count={hasLib ? suggestionCount : "—"} onClick={() => setView("suggest")} disabled={!hasLib} />
-        <SideItem icon={IconSearch} label="Search" active={view === "search"} onClick={() => setView("search")} disabled={!hasLib} />
+        <SideItem icon={IconSearch} label="Search" active={view === "search"} count={hasClip ? "semantic" : undefined} onClick={() => setView("search")} disabled={!hasLib} />
+        <SideItem icon={IconFace} label="People" active={view === "people"} count={peopleCount > 0 ? "AI" : "—"} onClick={() => setView("people")} disabled={!hasLib || peopleCount === 0} />
       </div>
 
       <div className="sb-divider" />
@@ -107,6 +109,16 @@ export function Sidebar({
       <div className="sb-spacer" />
 
       <div className="sb-footer">
+        {hasLib && !hasClip && (
+          <button
+            onClick={onRunAi}
+            className="sb-scan-btn"
+            style={{ background: "transparent", color: "var(--text)", border: "0.5px solid var(--accent)" }}
+          >
+            <IconSparkle size={14} />
+            <span>Enable AI analysis</span>
+          </button>
+        )}
         <button className="sb-scan-btn" onClick={onScan}>
           <IconPlus size={14} />
           <span>{hasLib ? "Scan another folder" : "Scan a folder"}</span>

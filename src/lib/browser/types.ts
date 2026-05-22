@@ -1,7 +1,14 @@
-// In-browser media item. Distinct from the Prisma MediaItem (server) — the
-// browser version holds File handles + base64 thumbnails in memory.
+// In-browser media item.
 
 import type { MediaCategory, MediaIntent } from "../db/enums";
+
+export interface FaceRecord {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  descriptor: number[]; // 128-d face-api descriptor
+}
 
 export interface BrowserMediaItem {
   id: string;
@@ -21,12 +28,12 @@ export interface BrowserMediaItem {
   intent: MediaIntent;
   categoryConfidence: number;
 
-  // Quality — computed locally on the decoded thumbnail.
-  // qualityScore: variance of Laplacian. Higher = sharper.
-  //   > 100 = sharp / good, 30-100 = borderline, < 30 = blurry
-  // brightness: 0..1 mean luma. < 0.18 = dark, > 0.92 = overexposed.
   qualityScore: number | null;
   brightness: number | null;
+
+  // AI — populated by the optional analysis phase.
+  clipEmbedding: number[] | null;   // 512-d CLIP image embedding (normalized)
+  faces: FaceRecord[] | null;        // face-api detections; empty array = analyzed, no faces
 }
 
 export interface BrowserDuplicateGroup {
@@ -39,7 +46,7 @@ export interface BrowserDuplicateGroup {
 }
 
 export interface ScanProgress {
-  phase: "idle" | "enumerating" | "hashing" | "thumbnails" | "dedup" | "done";
+  phase: "idle" | "enumerating" | "hashing" | "thumbnails" | "dedup" | "ai" | "done";
   scanned: number;
   total: number;
   current: string | null;
@@ -52,4 +59,13 @@ export interface BrowserLibrarySummary {
   itemCount: number;
   totalBytes: number;
   scannedAt: number;
+}
+
+export interface FaceCluster {
+  id: string;
+  label: string | null;
+  memberItemIds: string[];
+  representativeItemId: string;
+  representativeFaceIdx: number;
+  size: number;
 }

@@ -31,6 +31,7 @@ const TITLES: Record<View, string> = {
   trash: "Staged for trash",
   search: "Search",
   suggest: "AI Suggestions",
+  people: "People",
 };
 
 export function Topbar({

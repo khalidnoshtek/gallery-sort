@@ -115,6 +115,8 @@ async function processInput(
     categoryConfidence: cls.confidence,
     qualityScore,
     brightness,
+    clipEmbedding: null,
+    faces: null,
   };
 }
 
