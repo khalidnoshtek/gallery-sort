@@ -95,6 +95,7 @@ export function Sidebar({
         <SideItem icon={IconBroom} label="Dashboard" active={view === "cleanup"} count={hasLib && reclaimable > 0 ? fmtBytes(reclaimable) : "—"} onClick={() => setView("cleanup")} disabled={!hasLib} />
         <SideItem icon={IconDup} label="Duplicates" active={view === "dups"} count={dupGroupCount} onClick={() => setView("dups")} disabled={!hasLib} />
         <SideItem icon={IconTrash} label="Staged for trash" active={view === "trash"} count={stagedCount} onClick={() => setView("trash")} />
+        <SideItem icon={IconRestore} label="Library trash" active={view === "library-trash"} count={hasLib ? "open" : "—"} onClick={() => setView("library-trash")} disabled={!hasLib} />
       </div>
 
       {hasLib && (

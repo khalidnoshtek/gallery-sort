@@ -29,6 +29,7 @@ const TITLES: Record<View, string> = {
   cleanup: "Cleanup",
   dups: "Duplicates",
   trash: "Staged for trash",
+  "library-trash": "Library trash",
   search: "Search",
   suggest: "AI Suggestions",
   people: "People",

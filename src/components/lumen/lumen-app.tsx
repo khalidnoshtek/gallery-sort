@@ -12,6 +12,7 @@ import { DupView } from "./dup-view";
 import { SearchView } from "./search-view";
 import { SuggestView } from "./suggest-view";
 import { TrashView } from "./trash-view";
+import { LibraryTrashView } from "./library-trash-view";
 import { PeopleView } from "./people-view";
 import { FocusView } from "./focus-view";
 import { ScanModal } from "./scan-modal";
@@ -165,6 +166,9 @@ export function LumenApp() {
         break;
       case "trash":
         body = <TrashView />;
+        break;
+      case "library-trash":
+        body = <LibraryTrashView />;
         break;
       case "focus":
         body = focusCtx ? <FocusView ctx={focusCtx} onBack={backFromFocus} /> : null;
