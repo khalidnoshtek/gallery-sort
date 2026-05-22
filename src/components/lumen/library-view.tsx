@@ -5,7 +5,7 @@ import { useLibraryStore } from "@/state/library-store";
 import { PhotoCard } from "./photo-card";
 import { Lightbox } from "./lightbox";
 import { SortMenu } from "./sort-menu";
-import { monthOf, type Photo } from "@/lib/lumen/data";
+import { monthOf, type Photo, type PhotoCat } from "@/lib/lumen/data";
 import { sortItems, sortPhotos, type SortKey } from "@/lib/lumen/sort";
 import type { GridStyle } from "./types";
 
@@ -30,23 +30,46 @@ interface DragState {
   start: Set<string>;
 }
 
+// Category filter — null means "no filter, show all"
+type CatFilter = PhotoCat | "all";
+
+const FILTERS: Array<{ key: CatFilter; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "photo", label: "Photos" },
+  { key: "screenshot", label: "Screenshots" },
+  { key: "video", label: "Videos" },
+  { key: "document", label: "Docs" },
+  { key: "whatsapp", label: "WhatsApp" },
+  { key: "meme", label: "Memes" },
+];
+
 export function LibraryView({ photos, selected, setSelected, gridStyle, useMock = false }: Props) {
   const items = useLibraryStore((s) => s.items);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>(gridStyle === "timeline" ? "date-desc" : "date-desc");
+  const [sortKey, setSortKey] = useState<SortKey>("date-desc");
+  const [catFilter, setCatFilter] = useState<CatFilter>("all");
 
-  // Build a sorted version of `photos` for display. For timeline, the
-  // "sortKey" decides ordering within each month section.
-  const sortedPhotos = useMemo(() => sortPhotos(photos, sortKey), [photos, sortKey]);
+  // Filter then sort
+  const filteredPhotos = useMemo(() => {
+    if (catFilter === "all") return photos;
+    return photos.filter((p) => p.cat === catFilter);
+  }, [photos, catFilter]);
 
-  // Sorted real items in the same order as sortedPhotos — used by the lightbox.
+  const sortedPhotos = useMemo(() => sortPhotos(filteredPhotos, sortKey), [filteredPhotos, sortKey]);
+
   const sortedItems = useMemo(() => {
     const byId = new Map(items.map((it) => [it.id, it]));
-    const out = sortedPhotos.map((p) => byId.get(p.id)).filter((x): x is NonNullable<typeof x> => Boolean(x));
-    return out;
+    return sortedPhotos.map((p) => byId.get(p.id)).filter((x): x is NonNullable<typeof x> => Boolean(x));
   }, [sortedPhotos, items]);
+
+  // Per-category counts (against the full unfiltered list) for the chip labels
+  const catCounts = useMemo(() => {
+    const counts: Partial<Record<PhotoCat | "all", number>> = { all: photos.length };
+    for (const p of photos) counts[p.cat] = (counts[p.cat] ?? 0) + 1;
+    return counts;
+  }, [photos]);
 
   const toggle = useCallback(
     (id: string) => {
@@ -120,7 +143,6 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, useMock 
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(p);
     });
-    // Sort month buckets by recency of their newest item (regardless of inside-sort).
     return [...map.entries()].sort((a, b) => {
       const newestA = Math.max(...a[1].map((p) => new Date(p.date).getTime()));
       const newestB = Math.max(...b[1].map((p) => new Date(p.date).getTime()));
@@ -129,8 +151,8 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, useMock 
   }, [sortedPhotos]);
 
   const heightFor = (i: number) => {
-    if (gridStyle === "uniform" || gridStyle === "timeline") return 180;
-    const opts = [160, 220, 200, 260, 180, 240, 200, 220];
+    if (gridStyle === "uniform" || gridStyle === "timeline") return 220;
+    const opts = [220, 280, 240, 320, 220, 300, 240, 280];
     return opts[i % opts.length]!;
   };
 
@@ -146,31 +168,108 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, useMock 
     />
   );
 
-  // Click handler that decides between drag-select (no-op) and lightbox.
   const onCardClick = (photoId: string) => {
     const idx = sortedPhotos.findIndex((p) => p.id === photoId);
     if (idx >= 0) setLightboxIndex(idx);
   };
 
-  const sortBar = (
-    <div style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: "10px 28px 0",
-      gap: 10,
-    }}>
-      <span style={{ color: "var(--muted)", fontSize: 11.5, letterSpacing: "-0.005em" }}>
-        {sortedPhotos.length.toLocaleString()} photo{sortedPhotos.length === 1 ? "" : "s"}
-      </span>
-      <SortMenu value={sortKey} onChange={setSortKey} />
+  const toolbar = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "14px 28px",
+        borderBottom: "0.5px solid var(--border-soft)",
+        background: "var(--bg-2)",
+        flexWrap: "wrap",
+      }}
+    >
+      {/* Filter chips */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+        <span style={{ color: "var(--muted)", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", marginRight: 4 }}>
+          Filter
+        </span>
+        {FILTERS.map((f) => {
+          const count = catCounts[f.key] ?? 0;
+          if (f.key !== "all" && count === 0) return null;
+          const active = catFilter === f.key;
+          return (
+            <button
+              key={f.key}
+              onClick={() => setCatFilter(f.key)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 11px",
+                borderRadius: 999,
+                background: active ? "var(--text)" : "rgba(255,255,255,0.025)",
+                color: active ? "#0e0d10" : "var(--secondary)",
+                border: active ? "0" : "0.5px solid var(--border-soft)",
+                fontSize: 12,
+                cursor: "default",
+                letterSpacing: "-0.005em",
+                transition: "background 0.12s, color 0.12s",
+              }}
+            >
+              {f.label}
+              <span
+                style={{
+                  fontFamily: "var(--mono)",
+                  fontSize: 10.5,
+                  opacity: 0.7,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Sort */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <span style={{ color: "var(--muted)", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+          Sort
+        </span>
+        <SortMenu value={sortKey} onChange={setSortKey} />
+      </div>
     </div>
   );
+
+  // Empty state for filter that removed everything
+  if (sortedPhotos.length === 0 && photos.length > 0) {
+    return (
+      <>
+        {toolbar}
+        <div className="lib-scroll">
+          <div style={{ textAlign: "center", padding: 64, color: "var(--muted)" }}>
+            <h3 style={{ fontFamily: "var(--display)", fontSize: 18, fontWeight: 500, color: "var(--text)", margin: 0 }}>
+              No {FILTERS.find((f) => f.key === catFilter)?.label.toLowerCase() ?? "items"} to show
+            </h3>
+            <p style={{ marginTop: 8, fontSize: 13 }}>
+              Try a different filter, or scan another folder.
+            </p>
+            <button
+              onClick={() => setCatFilter("all")}
+              className="btn ghost"
+              style={{ marginTop: 16 }}
+            >
+              Show all
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   if (gridStyle === "timeline") {
     return (
       <>
-        {sortBar}
+        {toolbar}
         <div ref={containerRef} className="lib-scroll" onMouseDown={onMouseDown}>
           {groups.map(([month, items]) => (
             <section key={month} className="tl-section">
@@ -188,7 +287,7 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, useMock 
                     selected={selected.has(p.id)}
                     onToggle={toggle}
                     onOpen={() => onCardClick(p.id)}
-                    height={180}
+                    height={220}
                     useMock={useMock}
                   />
                 ))}
@@ -210,7 +309,7 @@ export function LibraryView({ photos, selected, setSelected, gridStyle, useMock 
 
   return (
     <>
-      {sortBar}
+      {toolbar}
       <div ref={containerRef} className="lib-scroll" onMouseDown={onMouseDown}>
         <div className={`lib-grid ${gridStyle}`}>
           {sortedPhotos.map((p, i) => (
@@ -253,8 +352,6 @@ function ClickableCard({
   height: number;
   useMock: boolean;
 }) {
-  // Wrap the existing PhotoCard with a click handler that opens the lightbox
-  // when the user clicks the image area (not the check button).
   return (
     <div
       onClick={(e) => {
@@ -275,5 +372,4 @@ function ClickableCard({
   );
 }
 
-// Re-export sortItems for callers (LumenApp uses it for the focus view sort)
 export { sortItems };
