@@ -145,10 +145,18 @@ export function TrashView() {
           </strong>
           <div style={{ color: "var(--secondary)" }}>
             {result.kind === "move" && (
-              <>
-                Files are in <code style={{ fontFamily: "var(--mono)", background: "rgba(255,255,255,0.04)", padding: "1px 5px", borderRadius: 3 }}>{result.folder}</code> inside your library.
-                Restore them from Finder, or permanently remove later with <code style={{ fontFamily: "var(--mono)", fontSize: 11.5 }}>rm -rf</code>.
-              </>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div>
+                  Files are at <code style={{ fontFamily: "var(--mono)", background: "rgba(255,255,255,0.04)", padding: "1px 5px", borderRadius: 3 }}>{result.folder}</code> inside the folder you picked.
+                </div>
+                <div style={{ color: "var(--warn)", fontSize: 12.5 }}>
+                  ⚠ This is a hidden folder (starts with a dot). In Finder, press <kbd style={{ fontFamily: "var(--mono)", padding: "1px 5px", border: "0.5px solid var(--border)", borderRadius: 3, background: "rgba(0,0,0,0.3)" }}>⌘ + Shift + .</kbd> to show hidden files.
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                  To restore: drag the files back out in Finder.
+                  To purge later: <code style={{ fontFamily: "var(--mono)", fontSize: 11.5 }}>rm -rf &quot;path-to-your-folder/{result.folder}&quot;</code> in Terminal.
+                </div>
+              </div>
             )}
             {result.kind === "script" && (
               <>
